@@ -1,0 +1,733 @@
+package parser
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"testing"
+
+	"os"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/reviewdog/reviewdog/proto/rdf"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/testing/protocmp"
+)
+
+func TestExampleSarifParser(t *testing.T) {
+	p := NewSarifParser()
+	for i, fixture := range fixtures {
+		diagnostics, err := p.Parse(strings.NewReader(fixture[0]))
+		if err != nil {
+			panic(err)
+		}
+		if len(diagnostics) == 0 {
+			t.Errorf("empty diagnostics")
+		}
+		for _, d := range diagnostics {
+			rdjson, err := protojson.MarshalOptions{Indent: "  "}.Marshal(d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var actualJSON map[string]any
+			var expectJSON map[string]any
+			if err := json.Unmarshal(rdjson, &actualJSON); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(fixture[1]), &expectJSON); err != nil {
+				t.Fatal(err)
+			}
+			expectJSON["originalOutput"] = actualJSON["originalOutput"]
+			if diff := cmp.Diff(actualJSON, expectJSON); diff != "" {
+				t.Errorf("fixtures[%d] (-got, +want):\n%s", i, diff)
+			}
+		}
+	}
+}
+
+func TestSarifParser_Suppressions(t *testing.T) {
+	// SARIF 2.1.0 §3.27.23 + §3.35: a result with an "accepted" suppression
+	// (Status absent or explicitly "accepted") should be skipped. Status
+	// "rejected" or "underReview" must still emit diagnostics.
+	sarifWithSuppression := func(suppressionsJSON string) string {
+		return `{
+			"version": "2.1.0",
+			"runs": [
+				{
+					"results": [
+						{
+							"level": "warning",
+							"locations": [
+								{
+									"physicalLocation": {
+										"artifactLocation": {"uri": "main.tf"},
+										"region": {"startLine": 1}
+									}
+								}
+							],
+							"message": {"text": "msg"},
+							"ruleId": "CKV_AWS_338"` + suppressionsJSON + `
+						}
+					],
+					"tool": {"driver": {"name": "checkov"}}
+				}
+			]
+		}`
+	}
+
+	cases := []struct {
+		name      string
+		input     string
+		wantCount int
+	}{
+		{
+			name:      "suppressed: kind inSource, status absent (defaults to accepted)",
+			input:     sarifWithSuppression(`, "suppressions": [{"kind": "inSource", "justification": "rationale"}]`),
+			wantCount: 0,
+		},
+		{
+			name:      "suppressed: kind inSource, status accepted",
+			input:     sarifWithSuppression(`, "suppressions": [{"kind": "inSource", "status": "accepted", "justification": "rationale"}]`),
+			wantCount: 0,
+		},
+		{
+			name:      "suppressed: kind external, status absent",
+			input:     sarifWithSuppression(`, "suppressions": [{"kind": "external"}]`),
+			wantCount: 0,
+		},
+		{
+			name:      "not suppressed: status rejected",
+			input:     sarifWithSuppression(`, "suppressions": [{"kind": "inSource", "status": "rejected"}]`),
+			wantCount: 1,
+		},
+		{
+			name:      "not suppressed: status underReview",
+			input:     sarifWithSuppression(`, "suppressions": [{"kind": "inSource", "status": "underReview"}]`),
+			wantCount: 1,
+		},
+		{
+			name:      "not suppressed: empty suppressions array",
+			input:     sarifWithSuppression(`, "suppressions": []`),
+			wantCount: 1,
+		},
+		{
+			name:      "not suppressed: suppressions field absent",
+			input:     sarifWithSuppression(``),
+			wantCount: 1,
+		},
+		{
+			name:      "suppressed: at least one accepted suppression among mixed",
+			input:     sarifWithSuppression(`, "suppressions": [{"kind": "inSource", "status": "rejected"}, {"kind": "inSource", "status": "accepted"}]`),
+			wantCount: 0,
+		},
+	}
+
+	p := NewSarifParser()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			diagnostics, err := p.Parse(strings.NewReader(tc.input))
+			if err != nil {
+				t.Fatalf("Parse error: %v", err)
+			}
+			if got := len(diagnostics); got != tc.wantCount {
+				t.Errorf("len(diagnostics) = %d, want %d", got, tc.wantCount)
+			}
+		})
+	}
+}
+
+func TestSarifParser_ResultKind(t *testing.T) {
+	// SARIF 2.1.0 §3.27.9: "pass" and "notApplicable" results record that a
+	// rule passed or did not apply, so they must not become diagnostics.
+	sarifWithKind := func(kindJSON string) string {
+		return `{
+			"version": "2.1.0",
+			"runs": [
+				{
+					"results": [
+						{` + kindJSON + `
+							"locations": [
+								{
+									"physicalLocation": {
+										"artifactLocation": {"uri": "main.go"},
+										"region": {"startLine": 1}
+									}
+								}
+							],
+							"message": {"text": "msg"},
+							"ruleId": "R1"
+						}
+					],
+					"tool": {"driver": {"name": "fixture"}}
+				}
+			]
+		}`
+	}
+
+	cases := []struct {
+		name      string
+		input     string
+		wantCount int
+	}{
+		{name: "kind absent (defaults to fail)", input: sarifWithKind(``), wantCount: 1},
+		{name: "kind fail", input: sarifWithKind(`"kind": "fail", "level": "error",`), wantCount: 1},
+		{name: "kind pass", input: sarifWithKind(`"kind": "pass", "level": "none",`), wantCount: 0},
+		{name: "kind notApplicable", input: sarifWithKind(`"kind": "notApplicable", "level": "none",`), wantCount: 0},
+		{name: "kind review", input: sarifWithKind(`"kind": "review",`), wantCount: 1},
+		{name: "kind open", input: sarifWithKind(`"kind": "open",`), wantCount: 1},
+		{name: "kind informational", input: sarifWithKind(`"kind": "informational",`), wantCount: 1},
+	}
+
+	p := NewSarifParser()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			diagnostics, err := p.Parse(strings.NewReader(tc.input))
+			if err != nil {
+				t.Fatalf("Parse error: %v", err)
+			}
+			if got := len(diagnostics); got != tc.wantCount {
+				t.Errorf("len(diagnostics) = %d, want %d", got, tc.wantCount)
+			}
+		})
+	}
+}
+
+func TestSarifParser_ReplacementInsertedContent(t *testing.T) {
+	// Regression test for https://github.com/reviewdog/reviewdog/issues/2808:
+	// ruff can emit a replacement without the optional insertedContent field.
+	for _, tc := range []struct {
+		name            string
+		insertedContent string
+		wantSuggestion  bool
+		wantText        string
+	}{
+		{name: "absent"},
+		{name: "null", insertedContent: `, "insertedContent": null`},
+		{name: "text absent", insertedContent: `, "insertedContent": {}`},
+		{name: "empty text", insertedContent: `, "insertedContent": {"text": ""}`, wantSuggestion: true},
+		{name: "nonempty text", insertedContent: `, "insertedContent": {"text": "import sys"}`, wantSuggestion: true, wantText: "import sys"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := `{
+				"version": "2.1.0",
+				"runs": [{
+					"tool": {"driver": {"name": "ruff"}},
+					"results": [{
+						"ruleId": "F401",
+						"level": "error",
+						"message": {"text": "unused import"},
+						"locations": [{"physicalLocation": {
+							"artifactLocation": {"uri": "src/main.py"},
+							"region": {"startLine": 1, "startColumn": 1, "endLine": 1, "endColumn": 10}
+						}}],
+						"fixes": [{"artifactChanges": [{
+							"artifactLocation": {"uri": "src/main.py"},
+							"replacements": [{
+								"deletedRegion": {"startLine": 1, "startColumn": 1, "endLine": 1, "endColumn": 10}` + tc.insertedContent + `
+							}]
+						}]}]
+					}]
+				}]
+			}`
+			got, err := NewSarifParser().Parse(strings.NewReader(input))
+			if err != nil {
+				t.Fatal(err)
+			}
+			rng := &rdf.Range{
+				Start: &rdf.Position{Line: 1},
+				End:   &rdf.Position{Line: 1, Column: 10},
+			}
+			want := &rdf.Diagnostic{
+				Message:  "unused import",
+				Location: &rdf.Location{Path: "src/main.py", Range: rng},
+				Severity: rdf.Severity_ERROR,
+				Source:   &rdf.Source{Name: "ruff"},
+				Code:     &rdf.Code{Value: "F401"},
+			}
+			if tc.wantSuggestion {
+				want.Suggestions = []*rdf.Suggestion{{Range: rng, Text: tc.wantText}}
+			}
+			if diff := cmp.Diff([]*rdf.Diagnostic{want}, got, protocmp.Transform(), protocmp.IgnoreFields(&rdf.Diagnostic{}, "original_output")); diff != "" {
+				t.Errorf("Parse() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestSarifParser_ArtifactLocationIndex(t *testing.T) {
+	input := `{
+		"version": "2.1.0",
+		"runs": [{
+			"tool": {"driver": {"name": "fixture"}},
+			"artifacts": [{"location": {"uri": "src/index-fixture.go"}}],
+			"results": [{
+				"message": {"text": "fixture finding"},
+				"locations": [{"physicalLocation": {
+					"artifactLocation": {"index": 0},
+					"region": {"startLine": 7}
+				}}]
+			}]
+		}]
+	}`
+
+	diagnostics, err := NewSarifParser().Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if got, want := len(diagnostics), 1; got != want {
+		t.Fatalf("len(diagnostics) = %d, want %d", got, want)
+	}
+	if got, want := diagnostics[0].GetLocation().GetPath(), "src/index-fixture.go"; got != want {
+		t.Errorf("location path = %q, want %q", got, want)
+	}
+}
+
+func TestSarifParser_ArtifactLocationIndexUnresolved(t *testing.T) {
+	tests := []struct {
+		name             string
+		artifactLocation string
+		artifacts        string
+	}{
+		{name: "not set (-1)", artifactLocation: `{"index": -1}`, artifacts: `[{"location": {"uri": "src/a.go"}}]`},
+		{name: "out of range", artifactLocation: `{"index": 1}`, artifacts: `[{"location": {"uri": "src/a.go"}}]`},
+		{name: "no artifacts", artifactLocation: `{"index": 0}`, artifacts: `[]`},
+		{name: "artifact without location", artifactLocation: `{"index": 0}`, artifacts: `[{"length": 10}]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := `{
+				"version": "2.1.0",
+				"runs": [{
+					"tool": {"driver": {"name": "fixture"}},
+					"artifacts": ` + tt.artifacts + `,
+					"results": [
+						{
+							"message": {"text": "unresolved"},
+							"locations": [{"physicalLocation": {
+								"artifactLocation": ` + tt.artifactLocation + `,
+								"region": {"startLine": 7}
+							}}]
+						},
+						{
+							"message": {"text": "resolved"},
+							"locations": [{"physicalLocation": {
+								"artifactLocation": {"uri": "src/b.go"},
+								"region": {"startLine": 3}
+							}}]
+						}
+					]
+				}]
+			}`
+
+			diagnostics, err := NewSarifParser().Parse(strings.NewReader(input))
+			if err != nil {
+				t.Fatalf("Parse error: %v", err)
+			}
+			if got, want := len(diagnostics), 2; got != want {
+				t.Fatalf("len(diagnostics) = %d, want %d", got, want)
+			}
+			if got := diagnostics[0].GetLocation().GetPath(); got != "" {
+				t.Errorf("unresolved location path = %q, want empty", got)
+			}
+			if got, want := diagnostics[1].GetLocation().GetPath(), "src/b.go"; got != want {
+				t.Errorf("resolved location path = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func basedir() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+	return wd
+}
+
+var fixtures = [][]string{{
+	fmt.Sprintf(`{
+	"$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+	"version": "2.1.0",
+	"runs": [
+		{
+			"originalUriBaseIds": {
+				"SRCROOT": {
+					"uri": "file://%s"
+				}
+			},
+			"results": [
+				{
+					"level": "warning",
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "src/MyClass.kt",
+									"uriBaseId": "SRCROOT"
+								},
+								"region": {
+									"startLine": 10,
+									"startColumn": 5,
+									"endLine": 12,
+									"endColumn": 15
+								}
+							}
+						}
+					],
+					"message": {
+						"text": "result message"
+					},
+					"ruleId": "rule_id"
+				}
+			],
+			"tool": {
+				"driver": {
+					"informationUri": "https://example.com",
+					"name": "driver_name",
+					"rules": [
+						{
+							"helpUri": "https://example.com",
+							"id": "rule_id",
+							"name": "My Rule",
+							"shortDescription": {
+								"text": "Rule description"
+							}
+						}
+					]
+				}
+			}
+		}
+	]
+}`, basedir()), `{
+	"message": "result message",
+	"location": {
+		"path": "src/MyClass.kt",
+		"range": {
+			"start": {
+				"line": 10,
+				"column": 5
+			},
+			"end": {
+				"line": 12,
+				"column": 15
+			}
+		}
+	},
+	"severity": "WARNING",
+	"source": {
+		"name": "driver_name",
+		"url": "https://example.com"
+	},
+	"code": {
+		"value": "rule_id",
+		"url": "https://example.com"
+	}
+}`},
+	{`{
+	"runs": [
+		{
+			"originalUriBaseIds": {
+				"SRCROOT": {
+					"description": {
+						"text": "uri deleted root"
+					}
+				}
+			},
+			"results": [
+				{
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "src/MyClass.kt",
+									"uriBaseId": "SRCROOT"
+								},
+								"region": {
+									"startLine": 10
+								}
+							}
+						}
+					],
+					"message": {
+						"text": "message"
+					},
+					"ruleId": "rule_id"
+				}
+			],
+			"tool": {
+				"driver": {
+					"name": "driver_name",
+					"rules": [
+						{
+							"id": "rule_id",
+							"defaultConfiguration": {
+								"level": "error"
+							}
+						}
+					]
+				}
+			}
+		}
+	]
+}`, `{
+	"message": "message",
+	"location": {
+		"path": "src/MyClass.kt",
+		"range": {
+			"start": {
+				"line": 10
+			}
+		}
+	},
+	"severity": "ERROR",
+	"source": {
+		"name": "driver_name"
+	},
+	"code": {
+		"value": "rule_id"
+	}
+}`},
+	{`{
+	"runs": [
+		{
+			"results": [
+				{
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "src/MyClass.kt"
+								},
+								"region": {
+									"startLine": 10
+								}
+							}
+						}
+					],
+					"fixes": [
+						{
+							"artifactChanges": [
+								{
+									"artifactLocation": {
+										"uri": "src/MyClass.kt"
+									},
+									"replacements": [
+										{
+											"deletedRegion": {
+												"startLine": 10,
+												"startColumn": 1,
+												"endColumn": 1
+											},
+											"insertedContent": {
+												"text": "// "
+											}
+										}
+									]
+								}
+							]
+						}
+					],
+					"message": {
+						"markdown": "message"
+					},
+					"ruleId": "rule_id"
+				}
+			],
+			"tool": {
+				"driver": {
+					"name": "driver_name"
+				}
+			}
+		}
+	]
+}`, `{
+	"message": "message",
+	"location": {
+		"path": "src/MyClass.kt",
+		"range": {
+			"start": {
+				"line": 10
+			}
+		}
+	},
+	"source": {
+		"name": "driver_name"
+	},
+	"code": {
+		"value": "rule_id"
+	},
+	"suggestions": [
+		{
+			"range": {
+				"start": {
+					"line": 10,
+					"column": 1
+				},
+				"end": {
+					"line": 10,
+					"column": 1
+				}
+			},
+			"text": "// "
+		}
+	]
+}`},
+	{fmt.Sprintf(`{
+	"runs": [
+	  {
+		"originalUriBaseIds": {
+			"ROOTPATH": {
+			  "uri": "%s"
+			}
+		  },
+		"tool": {
+		  "driver": {
+			"name": "Trivy",
+			"informationUri": "https://github.com/aquasecurity/trivy",
+			"fullName": "Trivy Vulnerability Scanner",
+			"version": "0.15.0",
+			"rules": [
+			  {
+				"id": "CVE-2018-14618/curl",
+				"name": "OS Package Vulnerability (Alpine)",
+				"shortDescription": {
+				  "text": "CVE-2018-14618 Package: curl"
+				},
+				"fullDescription": {
+				  "text": "curl: NTLM password overflow via integer overflow."
+				},
+				"defaultConfiguration": {
+				  "level": "error"
+				},
+				"helpUri": "https://avd.aquasec.com/nvd/cve-2018-14618",
+				"help": {
+				  "text": "Vulnerability CVE-2018-14618\nSeverity: CRITICAL\n...",
+				  "markdown": "**Vulnerability CVE-2018-14618**\n| Severity..."
+				},
+				"properties": {
+				  "tags": [
+					"vulnerability",
+					"CRITICAL",
+					"curl"
+				  ],
+				  "precision": "very-high"
+				}
+			  }
+			]
+		  }
+		},
+		"results": [
+		  {
+			"ruleId": "CVE-2018-14618/curl",
+			"ruleIndex": 0,
+			"level": "error",
+			"message": {
+			  "text": "curl before version 7.61.1 is..."
+			},
+			"locations": [{
+			  "physicalLocation": {
+				"artifactLocation": {
+				  "uri": "knqyf263/vuln-image (alpine 3.7.1)",
+				  "uriBaseId": "ROOTPATH"
+				}
+			  }
+			}]
+		  }]
+	  }
+	]
+  }
+`, basedir()), `{
+	"message": "curl before version 7.61.1 is...",
+	"location": {
+		"path": "knqyf263/vuln-image (alpine 3.7.1)"
+	},
+	"severity": "ERROR",
+	"source": {
+		"name": "Trivy",
+		"url": "https://github.com/aquasecurity/trivy"
+	},
+	"code": {
+		"value": "CVE-2018-14618/curl",
+		"url": "https://avd.aquasec.com/nvd/cve-2018-14618"
+	}
+}`},
+	{fmt.Sprintf(`{
+	"runs": [ {
+		"originalUriBaseIds": {
+			"ROOTPATH": {
+			  "uri": "%s"
+			}
+		},
+		"tool": {
+			"driver": {
+				"name": "driver_name"
+			}
+		},
+		"results": [
+			{
+				"ruleId": "PY2335",
+				"message": {
+          "text": "Use of tainted variable 'expr' in the insecure function 'eval'."
+        },
+				"locations": [
+					{
+						"physicalLocation": {
+							"artifactLocation": {
+								"uri": "3-Beyond-basics/bad-eval.py"
+							},
+							"region": {
+								"startLine": 4
+							}
+						}
+					}
+				],
+				"relatedLocations": [
+					{
+						"message": {
+							"text": "The tainted data entered the system here."
+						},
+						"physicalLocation": {
+							"artifactLocation": {
+								"uri": "3-Beyond-basics/bad-eval.py"
+							},
+							"region": {
+								"startLine": 3
+							}
+						}
+					}
+				]
+			}
+			]
+	  } ]
+  }
+`, basedir()), `{
+	"message": "Use of tainted variable 'expr' in the insecure function 'eval'.",
+	"location": {
+		"path": "3-Beyond-basics/bad-eval.py",
+    "range": {
+      "start": {
+        "line": 4
+      }
+    }
+	},
+	"source": {
+		"name": "driver_name"
+	},
+	"code": {
+		"value": "PY2335"
+	},
+  "relatedLocations": [
+    {
+      "message": "The tainted data entered the system here.",
+			"location": {
+				"path": "3-Beyond-basics/bad-eval.py",
+				"range": {
+					"start": {
+						"line": 3
+					}
+				}
+			}
+    }
+  ]
+}`},
+}

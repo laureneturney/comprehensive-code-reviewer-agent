@@ -1,0 +1,132 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"github.com/vvakame/sdlog/aelog"
+
+	"github.com/reviewdog/reviewdog/doghouse"
+	"github.com/reviewdog/reviewdog/doghouse/server"
+	"github.com/reviewdog/reviewdog/doghouse/server/storage"
+)
+
+type githubChecker struct {
+	privateKey       []byte
+	integrationID    int
+	ghInstStore      storage.GitHubInstallationStore
+	ghRepoTokenStore storage.GitHubRepositoryTokenStore
+	tr               http.RoundTripper
+}
+
+func (gc *githubChecker) handleCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	ctx := r.Context()
+
+	var req doghouse.CheckRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("failed to decode request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Check authorization.
+	if !gc.validateCheckRequest(ctx, w, r, req.Owner, req.Repo) {
+		return
+	}
+
+	opt := &server.NewGitHubClientOption{
+		PrivateKey:    gc.privateKey,
+		IntegrationID: gc.integrationID,
+		RepoOwner:     req.Owner,
+		Client: &http.Client{
+			Transport: gc.tr,
+		},
+	}
+
+	gh, err := server.NewGitHubClient(ctx, opt)
+	if err != nil {
+		aelog.Errorf(ctx, "failed to create GitHub client: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintln(w, err)
+		return
+	}
+
+	res, err := server.NewChecker(&req, gh, true /* inDogHouseServer */).Check(ctx)
+	if err != nil {
+		aelog.Errorf(ctx, "failed to run checker: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintln(w, err)
+		return
+	}
+	if err := json.NewEncoder(w).Encode(res); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintln(w, err)
+		return
+	}
+}
+
+func (gc *githubChecker) validateCheckRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, owner, repo string) bool {
+	return gc.validateCheckToken(ctx, w, r, owner, repo)
+}
+
+func (gc *githubChecker) validateCheckToken(ctx context.Context, w http.ResponseWriter, r *http.Request, owner, repo string) bool {
+	token := extractBearerToken(r)
+	if token == "" {
+		w.Header().Set("The WWW-Authenticate", `error="invalid_request", error_description="The access token not provided"`)
+		msg := fmt.Sprintf("The access token not provided. Get token from %s", githubRepoURL(ctx, r, owner, repo))
+		http.Error(w, msg, http.StatusUnauthorized)
+		return false
+	}
+	_, wantToken, err := gc.ghRepoTokenStore.Get(ctx, owner, repo)
+	if err != nil {
+		aelog.Errorf(ctx, "failed to get repository (%s/%s) token: %v", owner, repo, err)
+	}
+	if wantToken == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return false
+	}
+	if token != wantToken.Token {
+		w.Header().Set("The WWW-Authenticate", `error="invalid_token", error_description="The access token is invalid"`)
+		msg := fmt.Sprintf("The access token is invalid. Get valid token from %s", githubRepoURL(ctx, r, owner, repo))
+		http.Error(w, msg, http.StatusUnauthorized)
+		return false
+	}
+	return true
+}
+
+func githubRepoURL(ctx context.Context, r *http.Request, owner, repo string) string {
+	u := doghouseBaseURL(ctx, r)
+	u.Path = fmt.Sprintf("/gh/%s/%s", owner, repo)
+	return u.String()
+}
+
+func doghouseBaseURL(ctx context.Context, r *http.Request) *url.URL {
+	scheme := ""
+	if r.URL != nil && r.URL.Scheme != "" {
+		scheme = r.URL.Scheme
+	}
+	if scheme == "" {
+		scheme = "https"
+	}
+	u, err := url.Parse(scheme + "://" + r.Host)
+	if err != nil {
+		aelog.Errorf(ctx, "%v", err)
+	}
+	return u
+}
+
+func extractBearerToken(r *http.Request) string {
+	auth := r.Header.Get("Authorization")
+	prefix := "bearer "
+	if strings.HasPrefix(strings.ToLower(auth), prefix) {
+		return auth[len(prefix):]
+	}
+	return ""
+}

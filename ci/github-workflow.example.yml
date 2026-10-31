@@ -1,0 +1,44 @@
+# Example .github/workflows/ai-review.yml for a project using comprehensive-code-reviewer-agent.
+# Secrets: OPENAI__KEY, OPENAI__API_BASE (optional), OCR_LLM_URL, OCR_LLM_TOKEN.
+# Variables: PR_AGENT_MODEL, OCR_LLM_MODEL.
+# GITHUB_TOKEN is provided by Actions and feeds both reviewdog and pr-agent through ccra.
+name: AI code review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: <your-org>/comprehensive-code-reviewer-agent
+          path: ccra
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install from vendored assets (no network)
+        run: |
+          ccra/scripts/install.sh --prefix "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Review
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI__KEY: ${{ secrets.OPENAI__KEY }}
+          OPENAI__API_BASE: ${{ secrets.OPENAI__API_BASE }}
+          CONFIG__MODEL: ${{ vars.PR_AGENT_MODEL }}
+          OCR_LLM_URL: ${{ secrets.OCR_LLM_URL }}
+          OCR_LLM_TOKEN: ${{ secrets.OCR_LLM_TOKEN }}
+          OCR_LLM_MODEL: ${{ vars.OCR_LLM_MODEL }}
+        run: |
+          ccra review --reporter github-pr-review \
+            --from "${{ github.event.pull_request.base.sha }}" \
+            --to "${{ github.event.pull_request.head.sha }}" \
+            --pr-url "${{ github.event.pull_request.html_url }}"

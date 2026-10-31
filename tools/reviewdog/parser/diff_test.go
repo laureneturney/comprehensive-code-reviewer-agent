@@ -1,0 +1,220 @@
+package parser
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"testing"
+
+	"google.golang.org/protobuf/encoding/protojson"
+)
+
+func ExampleDiffParser() {
+	const sample = `diff --git a/gofmt.go b/gofmt.go
+--- a/gofmt.go	2020-07-26 08:01:09.260800318 +0000
++++ b/gofmt.go	2020-07-26 08:01:09.260800318 +0000
+@@ -1,6 +1,6 @@
+ package testdata
+ 
+-func    fmt     () {
++func fmt() {
+ 	// test
+ 	// test line
+ 	// test line
+@@ -10,11 +10,11 @@
+ 	// test line
+ 	// test line
+ 
+-println(
+-		"hello, gofmt test"    )
+-//comment
++	println(
++		"hello, gofmt test")
++	//comment
+ }
+ 
++type s struct{ A int }
+ 
+-type s struct { A int }
+ func (s s) String() { return "s" }
+`
+	const strip = 1
+	p := NewDiffParser(strip)
+	diagnostics, err := p.Parse(strings.NewReader(sample))
+	if err != nil {
+		panic(err)
+	}
+	for _, d := range diagnostics {
+		rdjson, _ := protojson.MarshalOptions{Indent: "  "}.Marshal(d)
+		var out bytes.Buffer
+		json.Indent(&out, rdjson, "", "  ")
+		fmt.Println(out.String())
+	}
+	// Output:
+	// {
+	//   "location": {
+	//     "path": "gofmt.go",
+	//     "range": {
+	//       "start": {
+	//         "line": 3
+	//       },
+	//       "end": {
+	//         "line": 3
+	//       }
+	//     }
+	//   },
+	//   "suggestions": [
+	//     {
+	//       "range": {
+	//         "start": {
+	//           "line": 3
+	//         },
+	//         "end": {
+	//           "line": 3
+	//         }
+	//       },
+	//       "text": "func fmt() {"
+	//     }
+	//   ],
+	//   "originalOutput": "gofmt.go:3:-func    fmt     () {\ngofmt.go:3:+func fmt() {"
+	// }
+	// {
+	//   "location": {
+	//     "path": "gofmt.go",
+	//     "range": {
+	//       "start": {
+	//         "line": 13
+	//       },
+	//       "end": {
+	//         "line": 15
+	//       }
+	//     }
+	//   },
+	//   "suggestions": [
+	//     {
+	//       "range": {
+	//         "start": {
+	//           "line": 13
+	//         },
+	//         "end": {
+	//           "line": 15
+	//         }
+	//       },
+	//       "text": "\tprintln(\n\t\t\"hello, gofmt test\")\n\t//comment"
+	//     }
+	//   ],
+	//   "originalOutput": "gofmt.go:13:-println(\ngofmt.go:14:-\t\t\"hello, gofmt test\"    )\ngofmt.go:15:-//comment\ngofmt.go:13:+\tprintln(\ngofmt.go:14:+\t\t\"hello, gofmt test\")\ngofmt.go:15:+\t//comment"
+	// }
+	// {
+	//   "location": {
+	//     "path": "gofmt.go",
+	//     "range": {
+	//       "start": {
+	//         "line": 18,
+	//         "column": 1
+	//       },
+	//       "end": {
+	//         "line": 18,
+	//         "column": 1
+	//       }
+	//     }
+	//   },
+	//   "suggestions": [
+	//     {
+	//       "range": {
+	//         "start": {
+	//           "line": 18,
+	//           "column": 1
+	//         },
+	//         "end": {
+	//           "line": 18,
+	//           "column": 1
+	//         }
+	//       },
+	//       "text": "type s struct{ A int }\n"
+	//     }
+	//   ],
+	//   "originalOutput": "gofmt.go:18:+type s struct{ A int }"
+	// }
+	// {
+	//   "location": {
+	//     "path": "gofmt.go",
+	//     "range": {
+	//       "start": {
+	//         "line": 19
+	//       },
+	//       "end": {
+	//         "line": 19
+	//       }
+	//     }
+	//   },
+	//   "suggestions": [
+	//     {
+	//       "range": {
+	//         "start": {
+	//           "line": 19
+	//         },
+	//         "end": {
+	//           "line": 19
+	//         }
+	//       }
+	//     }
+	//   ],
+	//   "originalOutput": "gofmt.go:19:-type s struct { A int }"
+	// }
+}
+
+func TestSuggestionContainsEofNewline(t *testing.T) {
+	const sample = `diff --git a/addeofnewline.old.txt b/addeofnewline.new.txt
+--- a/addeofnewline.old.txt
++++ b/addeofnewline.new.txt
+@@ -1,2 +1,2 @@
+ " vim: nofixeol noendofline
+-this file will have a newline at the end
+\ No newline at end of file
++this file will have a newline at the end
+`
+
+	const strip = 1
+	p := NewDiffParser(strip)
+	diagnostics, err := p.Parse(strings.NewReader(sample))
+	if err != nil {
+		panic(err)
+	}
+
+	if len(diagnostics) != 1 {
+		t.Errorf("expected 1 diagnostic, got %d", len(diagnostics))
+	}
+	if len(diagnostics[0].Suggestions) != 1 {
+		t.Errorf("expected 1 suggestion, got %d", len(diagnostics[0].Suggestions))
+	}
+	suggestion := diagnostics[0].Suggestions[0]
+	want := "this file will have a newline at the end\n"
+	if suggestion.Text != want {
+		t.Errorf("suggestion.Text = %q, want %q", suggestion.Text, want)
+	}
+}
+
+func TestInsertionAtTopOfFile(t *testing.T) {
+	tests := map[string]struct {
+		hunk string
+		want string
+	}{
+		"with context": {"@@ -1,2 +1,3 @@\n+# header\n a\n-b\n+B\n", "[1 2]"},
+		"no context":   {"@@ -0,0 +1 @@\n+# header\n", "[1]"},
+	}
+	for name, tt := range tests {
+		diagnostics, err := NewDiffParser(1).Parse(strings.NewReader("--- a/a.txt\n+++ b/a.txt\n" + tt.hunk))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var lines []int32
+		for _, d := range diagnostics {
+			lines = append(lines, d.GetLocation().GetRange().GetStart().GetLine())
+		}
+		if got := fmt.Sprint(lines); got != tt.want {
+			t.Errorf("%s: start lines = %s, want %s", name, got, tt.want)
+		}
+	}
+}

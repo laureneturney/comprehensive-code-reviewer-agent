@@ -1,0 +1,46 @@
+# Go to https://gitlab.com/reviewdog/reviewdog/-/settings/repository#js-push-remote-settings
+# to sync the repository manually.
+
+# Open merge request automatically and run reviewdog against created MR.
+stages:
+  - openMr
+  - reviewdog
+
+# https://github.com/tmaier/gitlab-auto-merge-request
+Open Merge Request:
+  only:
+    - branches
+  except:
+    - master
+  stage: openMr
+  image: tmaier/gitlab-auto-merge-request:1
+  before_script: []
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - merge-request.sh
+
+Reviewdog:
+  only:
+    - branches
+  except:
+    - master
+  stage: reviewdog
+  image: golang:latest
+  cache:
+    key:
+      files:
+        - go.sum
+    paths:
+      - .cache
+  before_script:
+    - export GO111MODULE=on
+    - export GOPATH=${CI_PROJECT_DIR}/.cache
+    - export PATH=$PATH:$GOPATH/bin
+    - go install ./cmd/reviewdog
+    - go install golang.org/x/lint/golint@latest
+  script:
+    - golint ./... | reviewdog -f=golint -name=golint-discussion -reporter=gitlab-mr-discussion -filter-mode=nofilter
+    - golint ./... | reviewdog -f=golint -name=golint-commit -reporter=gitlab-mr-commit
+    - cd ./_testdata/ && golint ./... | reviewdog -f=golint -name=golint-discussion-subdir -reporter=gitlab-mr-discussion; cd -
+    - cat ./_testdata/custom_rdjson.json | reviewdog -name="custom-rdjson" -f=rdjson -reporter=gitlab-mr-discussion

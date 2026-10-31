@@ -1,0 +1,28 @@
+# Drop this file as `.pr_agent.toml` in the root of a repository you review with pr-agent.
+# It overrides pr-agent's defaults for that repository only.
+# Full reference: tools/pr-agent/pr_agent/settings/configuration.toml
+
+[config]
+# model = "openai/my-internal-model"
+# fallback_models = []
+# custom_model_max_tokens = 128000
+publish_output = true
+verbosity_level = 1
+
+[pr_reviewer]
+require_score_review = false
+require_tests_review = true
+require_security_review = true
+require_estimate_effort_to_review = true
+num_max_findings = 5
+extra_instructions = """
+Focus on correctness, security and data-loss risks before style.
+"""
+
+[pr_code_suggestions]
+num_code_suggestions_per_chunk = 4
+commitable_code_suggestions = false
+
+[pr_description]
+publish_labels = false
+generate_ai_title = false

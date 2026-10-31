@@ -1,0 +1,37 @@
+# Example .gitlab-ci.yml for a project that uses comprehensive-code-reviewer-agent.
+#
+# Assumes the ccra repository is reachable by the runner WITHOUT GitHub access,
+# e.g. mirrored on the same GitLab instance. Required CI/CD variables (masked):
+#   GITLAB_TOKEN                                     token with `api` scope: posts MR discussions
+#   OPENAI__KEY, OPENAI__API_BASE, CONFIG__MODEL     pr-agent LLM (OpenAI-compatible gateway)
+#   OCR_LLM_URL, OCR_LLM_TOKEN, OCR_LLM_MODEL        open-code-review LLM (OCR_LLM_PROTOCOL=openai|anthropic)
+#
+# reviewdog and pr-agent both read GITLAB_TOKEN via ccra; CI_API_V4_URL and the
+# CI_MERGE_REQUEST_* variables are provided by GitLab automatically and ccra uses
+# them to pick the diff range and the MR URL.
+
+stages: [review]
+
+ai-code-review:
+  stage: review
+  image: python:3.12            # needs git + python>=3.12; the full image has both
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+  variables:
+    GIT_DEPTH: 0                # ocr/pr-agent need the merge base
+    CCRA_REPO: https://gitlab.example.com/tools/comprehensive-code-reviewer-agent.git
+    CONFIG__GIT_PROVIDER: gitlab
+  before_script:
+    - git clone --depth 1 "$CCRA_REPO" /opt/ccra
+    - /opt/ccra/scripts/install.sh --prefix /usr/local/bin
+    - ccra doctor
+  script:
+    # 1) ocr AI review -> SARIF -> reviewdog posts inline MR discussions
+    # 2) pr-agent /review posts its summary on the MR (URL derived from CI vars)
+    - ccra review --reporter gitlab-mr-discussion
+    # Optional: classic linters through reviewdog as well
+    - ccra lint -runners=ruff,shellcheck -reporter=gitlab-mr-discussion || true
+  artifacts:
+    when: always
+    paths: [.ccra-review/]
+    expire_in: 1 week

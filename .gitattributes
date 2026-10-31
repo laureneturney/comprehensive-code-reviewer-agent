@@ -1,0 +1,9 @@
+# Keep vendored assets byte-exact and out of diffs
+vendor/binaries/** binary -diff
+vendor/wheels/**/*.whl binary -diff
+*.gz binary
+*.tar.gz binary
+*.whl binary
+# Shell scripts must stay LF so they run on Linux
+*.sh text eol=lf
+bin/ccra text eol=lf

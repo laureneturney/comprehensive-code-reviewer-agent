@@ -1,0 +1,39 @@
+# reviewdog runner config used by `ccra lint`.
+# Copy to .reviewdog.yml in a project to customise, or pass -conf=path.
+# Run a subset with:  ccra lint -runners=ruff,shellcheck -reporter=local -diff="git diff main"
+# Every runner needs its linter on PATH; remove the ones you do not use.
+runner:
+  ruff:
+    cmd: ruff check --output-format=concise .
+    errorformat:
+      - '%f:%l:%c: %m'
+    level: warning
+  flake8:
+    cmd: flake8 .
+    format: flake8
+    level: warning
+  mypy:
+    cmd: mypy --show-column-numbers .
+    errorformat:
+      - '%f:%l:%c: %t%*[^:]: %m'
+    level: warning
+  eslint:
+    cmd: npx eslint -f stylish .
+    format: eslint-compact
+    level: warning
+  golangci-lint:
+    cmd: golangci-lint run --out-format=line-number
+    format: golangci-lint
+    level: warning
+  govet:
+    cmd: go vet ./...
+    format: govet
+    level: error
+  shellcheck:
+    cmd: shellcheck -f gcc $(git ls-files '*.sh')
+    format: gcc
+    level: warning
+  hadolint:
+    cmd: hadolint -f tty $(git ls-files 'Dockerfile*' '*.Dockerfile')
+    format: hadolint
+    level: warning

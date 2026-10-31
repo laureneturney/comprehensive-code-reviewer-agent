@@ -1,0 +1,82 @@
+{
+  "generated": "2026-10-31",
+  "generated_by": "scripts/sync-upstream.sh + scripts/fetch-offline-assets.sh (initial import done by hand on macOS arm64)",
+  "tools": [
+    {
+      "name": "open-code-review",
+      "cli": "ocr",
+      "path": "tools/open-code-review",
+      "upstream": "https://github.com/alibaba/open-code-review.git",
+      "branch": "main",
+      "tag": "v1.13.3",
+      "commit": "216dcf513593055a70165f793e96b52589d71b1b",
+      "commit_date": "2026-10-30T14:18:11+08:00",
+      "license": "Apache-2.0",
+      "language": "go",
+      "notes": "Go CLI. The npm launcher (bin/ocr.js) looks for bin/opencodereview; this repo installs the prebuilt binary directly instead."
+    },
+    {
+      "name": "ponytail",
+      "cli": null,
+      "path": "tools/ponytail",
+      "upstream": "https://github.com/dietrichgebert/ponytail",
+      "branch": "main",
+      "tag": "v5.3.3",
+      "commit": "96608e078b2d5ea607c5c3b8b5a54d1c1fba6846",
+      "commit_date": "2026-10-29T12:59:31+01:00",
+      "license": "MIT",
+      "language": "javascript+markdown",
+      "notes": "Agent skill/plugin pack (Claude Code, Codex, Cursor, OpenCode, Gemini CLI, ...). No build step, no dependencies; node is optional for its lifecycle hooks."
+    },
+    {
+      "name": "pr-agent",
+      "cli": "pr-agent",
+      "path": "tools/pr-agent",
+      "upstream": "https://github.com/The-PR-Agent/pr-agent",
+      "branch": "main",
+      "tag": "v0.49.0",
+      "commit": "7bb7a68b451097d79dbc1c470e849b78dcf07eed",
+      "commit_date": "2026-10-31T13:05:04Z",
+      "license": "MIT",
+      "language": "python>=3.12",
+      "notes": "Run as `python -m pr_agent.cli` with PYTHONPATH=tools/pr-agent inside the venv built from vendor/wheels/pr-agent."
+    },
+    {
+      "name": "reviewdog",
+      "cli": "reviewdog",
+      "path": "tools/reviewdog",
+      "upstream": "https://github.com/reviewdog/reviewdog",
+      "branch": "master",
+      "tag": "v0.21.2",
+      "commit": "7334fb196a20ce543a1d4142ce06d591d0e846b8",
+      "commit_date": "2026-11-01T00:05:50+09:00",
+      "license": "MIT",
+      "language": "go",
+      "notes": "Go CLI. Prebuilt release archives vendored; building from source needs a Go module cache/proxy."
+    }
+  ],
+  "binaries": {
+    "open-code-review": {
+      "version": "v1.13.3",
+      "source": "https://github.com/alibaba/open-code-review/releases/tag/v1.13.3",
+      "platforms": ["linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64"],
+      "format": "gzip of the raw release binary; sha256sum.txt covers the uncompressed binary, SHA256SUMS-gz.txt covers the .gz"
+    },
+    "reviewdog": {
+      "version": "v0.21.2",
+      "source": "https://github.com/reviewdog/reviewdog/releases/tag/v0.21.2",
+      "platforms": ["Linux_x86_64", "Linux_arm64", "Darwin_x86_64", "Darwin_arm64"],
+      "format": "upstream .tar.gz archives; checksums.txt is upstream, SHA256SUMS.txt is local"
+    }
+  },
+  "wheels": {
+    "pr-agent": {
+      "lock_source": "tools/pr-agent/uv.lock (uv 0.13.5 export, --no-dev --extra github --extra gitlab)",
+      "python": "3.12 (cp312; abi3 wheels also work on newer CPython)",
+      "platforms": ["manylinux_2_17..2_34 x86_64", "macosx_11_0+ arm64"],
+      "extras_included": ["github", "gitlab"],
+      "extras_not_included": ["bitbucket", "azure", "codecommit", "gitea", "google", "mosaico", "lambda"],
+      "how_to_add_platforms": "scripts/fetch-offline-assets.sh --wheels-only --platform <tag> --python-version <x.y>"
+    }
+  }
+}

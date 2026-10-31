@@ -1,0 +1,82 @@
+package doghouse
+
+import (
+	"github.com/reviewdog/reviewdog/filter"
+	"github.com/reviewdog/reviewdog/proto/rdf"
+)
+
+// CheckRequest represents doghouse GitHub check request.
+type CheckRequest struct {
+	// Commit SHA.
+	// Required.
+	SHA string `json:"sha,omitempty"`
+	// PullRequest number.
+	// Optional.
+	PullRequest int `json:"pull_request,omitempty"`
+	// Owner of the repository.
+	// Required.
+	Owner string `json:"owner,omitempty"`
+	// Repository name.
+	// Required.
+	Repo string `json:"repo,omitempty"`
+
+	// Branch name.
+	// Optional.
+	// Deprecated: No need to fill this field.
+	Branch string `json:"branch,omitempty"`
+
+	// Annotations associated with the repository's commit and Pull Request.
+	Annotations []*Annotation `json:"annotations,omitempty"`
+
+	// Name of the annotation tool.
+	// Optional.
+	Name string `json:"name,omitempty"`
+
+	// Level is report level for this request.
+	// One of ["info", "warning", "error"]. Default is "error".
+	// Optional.
+	Level string `json:"level"`
+
+	// Deprecated: Use FilterMode == filter.NoFilter instead.
+	//
+	// OutsideDiff represents whether it report results in outside diff or not as
+	// annotations. It's useful only when PullRequest != 0. If PullRequest is
+	// empty, it will always report results all results including outside diff
+	// (because there are no diff!).
+	// Optional.
+	OutsideDiff bool `json:"outside_diff"`
+
+	// FilterMode represents a way to filter checks results
+	// Optional.
+	FilterMode filter.Mode `json:"filter_mode"`
+}
+
+// CheckResponse represents doghouse GitHub check response.
+type CheckResponse struct {
+	// ReportURL is report URL of check run.
+	// Optional.
+	ReportURL string `json:"report_url,omitempty"`
+
+	// Conclusion of check result, which is same as GitHub's conclusion of Check
+	// API. https://developer.github.com/v3/checks/runs/#parameters-1
+	Conclusion string `json:"conclusion,omitempty"`
+}
+
+// Annotation represents an annotation to file or specific line.
+type Annotation struct {
+	// Diagnostic.Location.Path must be relative path to the project root.
+	// Optional.
+	Diagnostic *rdf.Diagnostic `json:"diagnostic,omitempty"`
+
+	// Deprecated fields below. Need to support them for the old reviewdog CLI
+	// version.
+
+	// Deprecated: Use Diagnostic.
+	Path string `json:"path,omitempty"`
+	// Deprecated: Use Diagnostic.
+	Line int `json:"line,omitempty"`
+	// Deprecated: Use Diagnostic.
+	Message string `json:"message,omitempty"`
+	// Deprecated: Use Diagnostic.
+	RawMessage string `json:"raw_message,omitempty"`
+}

@@ -1,0 +1,11 @@
+--- nonewline.old.txt	2019-04-19 13:19:50.331526534 +0000
++++ nonewline.new.txt	2019-04-19 13:19:50.331526534 +0000
+@@ -1,4 +1,4 @@
+ " vim: nofixeol noendofline
+ No newline at end of both the old and new file
+-a
+-a
+\ No newline at end of file
++b
++b
+\ No newline at end of file

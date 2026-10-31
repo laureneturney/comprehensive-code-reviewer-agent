@@ -1,0 +1,27 @@
+# Self-test pipeline for this repository (no LLM, no network beyond the runner image).
+# For using ccra in *your* projects see ci/gitlab-ci.example.yml.
+stages: [verify, review]
+
+verify-offline-install:
+  stage: verify
+  image: python:3.12
+  script:
+    - scripts/verify-assets.sh
+    - scripts/install.sh
+    - bin/ccra doctor
+    - bin/ccra ocr --version
+    - bin/ccra reviewdog -version
+    - bin/ccra pr-agent --version
+
+# Example of the real thing on merge requests of this repo. Runs only when the
+# CI variable CCRA_LLM_ENABLED is "true" and the LLM/GitLab variables are set.
+ai-review:
+  stage: review
+  image: python:3.12
+  rules:
+    - if: '$CI_MERGE_REQUEST_IID && $CCRA_LLM_ENABLED == "true"'
+  variables:
+    GIT_DEPTH: 0
+  script:
+    - scripts/install.sh
+    - bin/ccra review --reporter gitlab-mr-discussion

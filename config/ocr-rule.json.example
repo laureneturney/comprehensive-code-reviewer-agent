@@ -1,0 +1,16 @@
+{
+  "_comment": "Drop as .opencodereview/rule.json in a reviewed repository. Path-scoped rules are appended to ocr's prompt for matching files. See tools/open-code-review/README.md and `ccra ocr rules --help`.",
+  "rules": [
+    {
+      "path": "**/*.py",
+      "rule": "Flag any SQL built with string formatting, any secret or credential literal, and any new dependency not already in pyproject/requirements.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "**/*.sql",
+      "rule": "Check for missing WHERE clauses on UPDATE/DELETE and for non-idempotent migrations.",
+      "merge_system_rule": true
+    }
+  ],
+  "exclude": ["**/generated/**", "**/testdata/**", "**/*.lock"]
+}

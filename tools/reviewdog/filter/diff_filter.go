@@ -1,0 +1,165 @@
+package filter
+
+import (
+	"fmt"
+
+	"github.com/reviewdog/reviewdog/diff"
+	"github.com/reviewdog/reviewdog/pathutil"
+	"github.com/reviewdog/reviewdog/service/serviceutil"
+)
+
+// Mode represents enumeration of available filter modes
+type Mode int
+
+const (
+	// ModeDefault represents default mode, which means users doesn't specify
+	// filter-mode. The behavior can be changed depending on reporters/context
+	// later if we want. Basically, it's same as ModeAdded because it's most safe
+	// and basic mode for reporters implementation.
+	ModeDefault Mode = iota
+	// ModeAdded represents filtering by added/changed diff lines.
+	ModeAdded
+	// ModeDiffContext represents filtering by diff context.
+	// i.e. changed lines +-N lines (e.g. N=3 for default git diff).
+	ModeDiffContext
+	// ModeFile represents filtering by changed files.
+	ModeFile
+	// ModeNoFilter doesn't filter out any results.
+	ModeNoFilter
+)
+
+// String implements the flag.Value interface
+func (mode *Mode) String() string {
+	names := [...]string{
+		"default",
+		"added",
+		"diff_context",
+		"file",
+		"nofilter",
+	}
+	if *mode < ModeDefault || *mode > ModeNoFilter {
+		return "Unknown mode"
+	}
+
+	return names[*mode]
+}
+
+// Set implements the flag.Value interface
+func (mode *Mode) Set(value string) error {
+	switch value {
+	case "default", "":
+		*mode = ModeDefault
+	case "added":
+		*mode = ModeAdded
+	case "diff_context":
+		*mode = ModeDiffContext
+	case "file":
+		*mode = ModeFile
+	case "nofilter":
+		*mode = ModeNoFilter
+	default:
+		return fmt.Errorf("invalid mode name: %s", value)
+	}
+	return nil
+}
+
+// DiffFilter filters lines by diff.
+type DiffFilter struct {
+	// Current working directory (workdir).
+	cwd string
+
+	// Relative path to the project root (e.g. git) directory from current workdir.
+	// It can be empty if it doesn't find any project root directory.
+	projectRelPath string
+
+	strip int
+	mode  Mode
+
+	difflines difflines
+	difffiles difffiles
+}
+
+// difflines is a hash table of normalized path to line number to *diff.Line.
+type difflines map[string]map[int]*diff.Line
+
+// difffiles is a hash table of normalized path to *diff.FileDiff.
+type difffiles map[string]*diff.FileDiff
+
+// NewDiffFilter creates a new DiffFilter.
+func NewDiffFilter(diff []*diff.FileDiff, strip int, cwd string, mode Mode) *DiffFilter {
+	df := &DiffFilter{
+		strip:     strip,
+		cwd:       cwd,
+		mode:      mode,
+		difflines: make(difflines),
+		difffiles: make(difffiles),
+	}
+	// If cwd is empty, projectRelPath should not have any meaningful data too.
+	if cwd != "" {
+		df.projectRelPath, _ = serviceutil.GitRelWorkdir()
+	}
+	df.addDiff(diff)
+	return df
+}
+
+func (df *DiffFilter) addDiff(filediffs []*diff.FileDiff) {
+	for _, filediff := range filediffs {
+		path := pathutil.NormalizeDiffPath(filediff.PathNew, df.strip)
+		df.difffiles[path] = filediff
+		lines, ok := df.difflines[path]
+		if !ok {
+			lines = make(map[int]*diff.Line)
+		}
+		for _, hunk := range filediff.Hunks {
+			for _, line := range hunk.Lines {
+				if line.LnumNew > 0 {
+					lines[line.LnumNew] = line
+				}
+			}
+		}
+		df.difflines[path] = lines
+	}
+}
+
+// ShouldReport returns true, if the given path should be reported depending on
+// the filter Mode. It also optionally return diff file/line.
+//
+// Path should be normalized before calling this function.
+func (df *DiffFilter) ShouldReport(path string, lnum int) (bool, *diff.FileDiff, *diff.Line) {
+	file := df.difffiles[path]
+	lines, ok := df.difflines[path]
+	if !ok {
+		return df.mode == ModeNoFilter, file, nil
+	}
+	line, ok := lines[lnum]
+	if !ok {
+		return df.mode == ModeNoFilter || df.mode == ModeFile, file, nil
+	}
+	return df.isSignificantLine(line), file, line
+}
+
+// DiffLine returns diff data from given new path and lnum. Returns nil if not
+// found.
+//
+// Path should be normalized before calling this function.
+func (df *DiffFilter) DiffLine(path string, lnum int) *diff.Line {
+	lines, ok := df.difflines[path]
+	if !ok {
+		return nil
+	}
+	line, ok := lines[lnum]
+	if !ok {
+		return nil
+	}
+	return line
+}
+
+func (df *DiffFilter) isSignificantLine(line *diff.Line) bool {
+	switch df.mode {
+	case ModeDiffContext, ModeFile, ModeNoFilter:
+		return true // any lines in diff are significant.
+	case ModeAdded, ModeDefault:
+		return line.Type == diff.LineAdded
+	}
+	return false
+}

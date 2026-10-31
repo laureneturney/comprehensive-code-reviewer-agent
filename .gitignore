@@ -1,0 +1,21 @@
+# Local install produced by `ccra install` (binaries, venv, env file with secrets)
+.ccra/
+# Review outputs
+.ccra-review/
+*.sarif
+/review.md
+/description.md
+/improve.md
+# Secrets
+.env
+*.secrets.toml
+.secrets.toml
+# Python / Node / editor noise
+__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+.DS_Store
+# Scratch dirs used by the online-side scripts
+.sync-tmp/

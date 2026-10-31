@@ -1,0 +1,56 @@
+[
+  {
+    "PathOld": "sample.old.txt",
+    "PathNew": "sample.new.txt",
+    "TimeOld": "2019-04-19 13:19:50.331526534 +0000",
+    "TimeNew": "2019-04-19 13:19:50.331526534 +0000",
+    "Hunks": [
+      {
+        "StartLineOld": 1,
+        "LineLengthOld": 3,
+        "StartLineNew": 1,
+        "LineLengthNew": 4,
+        "Section": "",
+        "Lines": [
+          {
+            "Type": 0,
+            "Content": "unchanged, contextual line",
+            "LnumDiff": 1,
+            "LnumOld": 1,
+            "LnumNew": 1
+          },
+          {
+            "Type": 2,
+            "Content": "deleted line",
+            "LnumDiff": 2,
+            "LnumOld": 2,
+            "LnumNew": 0
+          },
+          {
+            "Type": 1,
+            "Content": "added line",
+            "LnumDiff": 3,
+            "LnumOld": 0,
+            "LnumNew": 2
+          },
+          {
+            "Type": 1,
+            "Content": "added line",
+            "LnumDiff": 4,
+            "LnumOld": 0,
+            "LnumNew": 3
+          },
+          {
+            "Type": 0,
+            "Content": "unchanged, contextual line",
+            "LnumDiff": 5,
+            "LnumOld": 3,
+            "LnumNew": 4
+          }
+        ],
+        "EofNewline": 0
+      }
+    ],
+    "Extended": null
+  }
+]

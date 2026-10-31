@@ -1,0 +1,79 @@
+package gitea
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/exec"
+
+	gitea "gitea.dev/sdk"
+	"github.com/reviewdog/reviewdog"
+)
+
+var _ reviewdog.DiffService = (*PullRequestDiffService)(nil)
+
+// PullRequestDiffService is a DiffService which uses Gitea Diff API.
+type PullRequestDiffService struct {
+	Cli              *gitea.Client
+	Owner            string
+	Repo             string
+	PR               int64
+	SHA              string
+	FallBackToGitCLI bool
+}
+
+// Strip returns 1 as a strip of git diff.
+func (p *PullRequestDiffService) Strip() int {
+	return 1
+}
+
+// Diff returns a diff of PullRequest.
+func (p *PullRequestDiffService) Diff(ctx context.Context) ([]byte, error) {
+	d, resp, err := p.Cli.PullRequests.GetPullRequestDiff(ctx, p.Owner, p.Repo, p.PR, gitea.PullRequestDiffOptions{
+		Binary: false,
+	})
+	if err != nil {
+		if resp != nil && p.FallBackToGitCLI && resp.StatusCode == http.StatusNotFound {
+			log.Print("reviewdog: fallback to use git command")
+			return p.diffUsingGitCommand(ctx)
+		}
+
+		return nil, err
+	}
+	return []byte(d), nil
+}
+
+// diffUsingGitCommand returns a diff of PullRequest using git command.
+func (p *PullRequestDiffService) diffUsingGitCommand(ctx context.Context) ([]byte, error) {
+	pr, _, err := p.Cli.PullRequests.GetPullRequest(ctx, p.Owner, p.Repo, p.PR)
+	if err != nil {
+		return nil, err
+	}
+
+	head := pr.Head
+	headSha := head.Sha
+
+	if os.Getenv("REVIEWDOG_SKIP_GIT_FETCH") != "true" {
+		for _, sha := range []string{pr.Base.Sha, headSha} {
+			bytes, err := exec.Command("git", "fetch", "--depth=1", head.Repository.HTMLURL, sha).CombinedOutput()
+			if err != nil {
+				return nil, fmt.Errorf("failed to run git fetch: %s\n%w", bytes, err)
+			}
+		}
+	}
+
+	// Keep stderr out of the diff: git prints warnings there even on success
+	// (e.g. when diff.renameLimit is exceeded), and they would break parsing.
+	var stderr bytes.Buffer
+	cmd := exec.Command("git", "diff", "--find-renames", pr.Base.Sha, headSha)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to run git diff: %s\n%w", stderr.Bytes(), err)
+	}
+
+	return out, nil
+}

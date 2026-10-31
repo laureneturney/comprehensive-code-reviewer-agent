@@ -1,0 +1,20 @@
+# reviewdog.yml
+runner:
+  golint-by-project-conf:
+    cmd: golint $(go list ./... | grep -v /vendor/)
+    format: golint
+    level: warning
+  govet-by-project-conf:
+    cmd: go vet
+    format: govet
+    level: error
+  custom-rdjsonl:
+    cmd: jq -c -r '.diagnostics[:3].[]' ./_testdata/custom_rdjson.json
+    name: custom-rdjsonl-by-project-conf
+    format: rdjsonl
+  test-project-conf:
+    cmd: |
+      echo '.reviewdog.yml:17: test project conf (errorformat)'
+    level: info
+    errorformat:
+      - '%f:%l: %m'

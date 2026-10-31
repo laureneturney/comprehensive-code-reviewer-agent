@@ -1,0 +1,302 @@
+#!/usr/bin/env bash
+# ccra — Comprehensive Code Reviewer Agent
+# One front door for the vendored tools: open-code-review (ocr), reviewdog, pr-agent, ponytail.
+# Works fully offline once `ccra install` has run. See README.md and docs/USAGE.md.
+set -euo pipefail
+
+_resolve() { # follow symlinks without relying on GNU readlink -f
+  local p="$1" d
+  while [ -L "$p" ]; do
+    d="$(cd "$(dirname "$p")" && pwd)"
+    p="$(readlink "$p")"
+    [[ "$p" != /* ]] && p="$d/$p"
+  done
+  printf '%s\n' "$p"
+}
+SELF="$(_resolve "${BASH_SOURCE[0]}")"
+CCRA_ROOT="${CCRA_ROOT:-$(cd "$(dirname "$SELF")/.." && pwd)}"
+CCRA_HOME="${CCRA_HOME:-$CCRA_ROOT/.ccra}"
+CCRA_BIN="$CCRA_HOME/bin"
+CCRA_VENV="$CCRA_HOME/venv"
+CCRA_ENV_FILE="${CCRA_ENV_FILE:-$CCRA_HOME/env}"
+TOOLS="$CCRA_ROOT/tools"
+
+# Optional env file with tokens / LLM settings (git-ignored). See config/ccra.env.example.
+if [ -f "$CCRA_ENV_FILE" ]; then
+  set -a; . "$CCRA_ENV_FILE"; set +a
+fi
+
+# Offline-safe defaults: no update checks, no model-map or tokenizer downloads.
+export OCR_NO_UPDATE="${OCR_NO_UPDATE:-1}"
+export LITELLM_LOCAL_MODEL_COST_MAP="${LITELLM_LOCAL_MODEL_COST_MAP:-True}"
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+
+# One token per host feeds every tool.
+if [ -n "${GITLAB_TOKEN:-}" ]; then
+  export REVIEWDOG_GITLAB_API_TOKEN="${REVIEWDOG_GITLAB_API_TOKEN:-$GITLAB_TOKEN}"
+  export GITLAB__PERSONAL_ACCESS_TOKEN="${GITLAB__PERSONAL_ACCESS_TOKEN:-$GITLAB_TOKEN}"
+fi
+if [ -n "${GITLAB_URL:-}" ]; then
+  export GITLAB__URL="${GITLAB__URL:-$GITLAB_URL}"
+  export GITLAB_API="${GITLAB_API:-${GITLAB_URL%/}/api/v4}"
+fi
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  export REVIEWDOG_GITHUB_API_TOKEN="${REVIEWDOG_GITHUB_API_TOKEN:-$GITHUB_TOKEN}"
+  export GITHUB__USER_TOKEN="${GITHUB__USER_TOKEN:-$GITHUB_TOKEN}"
+fi
+
+die()  { echo "ccra: $*" >&2; exit 1; }
+note() { echo "==> $*" >&2; }
+need_installed() { [ -x "$CCRA_BIN/$1" ] || die "$1 is not installed. Run: ccra install"; }
+
+usage() {
+cat <<'USAGE'
+ccra — Comprehensive Code Reviewer Agent
+
+Usage: ccra <command> [args]
+
+Setup
+  install [opts]        Install everything from the vendored assets, no network (scripts/install.sh --help)
+  doctor                Show what is installed and configured
+  verify                Verify checksums of vendored binaries and wheels
+  version               Print ccra and bundled tool versions
+
+Tools (pass-through; `ccra <tool> --help` shows the tool's own help)
+  ocr <args>            open-code-review: AI diff review   (review | scan | delegate | config | rules | llm test)
+  reviewdog <args>      reviewdog: post linter/SARIF findings to the terminal, a GitLab MR or a GitHub PR
+  pr-agent <args>       pr-agent: AI PR/MR review, describe, improve, ask, doctor
+  agents <target>       Install ponytail + open-code-review skills into a coding agent:
+                          claude | codex | cursor | opencode | skills <dir> | agents-md <dir>
+
+Pipelines (run from the root of the repository under review)
+  review [opts]         ocr AI review -> SARIF -> reviewdog reporter; plus pr-agent when an MR/PR URL or local target is given
+  lint [opts]           Run the linters in config/reviewdog.yml through reviewdog
+
+Environment (put in .ccra/env; see config/ccra.env.example)
+  GITLAB_URL, GITLAB_TOKEN     GitLab for reviewdog and pr-agent
+  GITHUB_TOKEN                 GitHub for reviewdog and pr-agent
+  OPENAI__KEY, OPENAI__API_BASE, CONFIG__MODEL    pr-agent LLM (any OpenAI-compatible endpoint)
+  ocr LLM: `ccra ocr config set ...` (stored under ~/.opencodereview)
+USAGE
+}
+
+review_usage() {
+cat <<'USAGE'
+Usage: ccra review [options] [-- extra args for `ocr review`]
+
+What runs (from the root of the repository under review):
+  1. ocr review  --format sarif            AI review of the diff            -> .ccra-review/ocr.sarif
+  2. reviewdog   -f=sarif -reporter=...    publishes those findings         -> terminal / MR / PR
+  3. pr-agent    review                    only with --pr-url or --local-target
+
+Diff selection (default: working tree changes, like `ocr review`)
+  --from REF --to REF     branch range (merge-base), e.g. --from main --to HEAD
+  --commit SHA            single commit
+  In GitLab CI the merge request range and URL are detected from CI_* variables.
+
+Publishing
+  --reporter R            local (default) | gitlab-mr-discussion | gitlab-mr-commit |
+                          github-pr-review | github-pr-check | github-check | sarif | rdjson | rdjsonl
+  --filter-mode M         reviewdog filter mode: nofilter (default) | added | diff_context | file
+  --pr-url URL            run pr-agent /review against this MR/PR (needs GITLAB_TOKEN / GITHUB_TOKEN)
+  --local-target BRANCH   run pr-agent /review of HEAD vs this local branch; writes review.md, no hosting token needed
+
+Other
+  --effort low|medium|high   ocr effort preset
+  --out DIR                  output directory (default .ccra-review)
+  --skip-ocr | --skip-reviewdog | --skip-pr-agent
+USAGE
+}
+
+run_pr_agent() {
+  [ -x "$CCRA_VENV/bin/python" ] || die "pr-agent venv missing. Run: ccra install"
+  PYTHONPATH="$TOOLS/pr-agent${PYTHONPATH:+:$PYTHONPATH}" "$CCRA_VENV/bin/python" -m pr_agent.cli "$@"
+}
+
+cmd_install() { exec bash "$CCRA_ROOT/scripts/install.sh" "$@"; }
+cmd_verify()  { exec bash "$CCRA_ROOT/scripts/verify-assets.sh" "$@"; }
+
+cmd_version() {
+  echo "ccra $(cat "$CCRA_ROOT/VERSION")"
+  sed -n 's/^ *"tag": *"\([^"]*\)".*/\1/p' "$CCRA_ROOT/vendor/MANIFEST.json" | paste -d' ' - - - - | \
+    awk '{printf "bundled: open-code-review %s, ponytail %s, pr-agent %s, reviewdog %s\n", $1, $2, $3, $4}'
+}
+
+cmd_doctor() {
+  echo "ccra root:    $CCRA_ROOT"
+  echo "ccra home:    $CCRA_HOME"
+  if [ -f "$CCRA_ENV_FILE" ]; then echo "env file:     $CCRA_ENV_FILE (loaded)"; else echo "env file:     $CCRA_ENV_FILE (missing; cp config/ccra.env.example $CCRA_ENV_FILE)"; fi
+  echo
+  printf '%-12s' "ocr:";       if [ -x "$CCRA_BIN/ocr" ]; then "$CCRA_BIN/ocr" --version 2>/dev/null | head -1; else echo "not installed"; fi
+  printf '%-12s' "reviewdog:"; if [ -x "$CCRA_BIN/reviewdog" ]; then echo "reviewdog $("$CCRA_BIN/reviewdog" -version 2>/dev/null)"; else echo "not installed"; fi
+  printf '%-12s' "pr-agent:";  if [ -x "$CCRA_VENV/bin/python" ]; then run_pr_agent --version 2>/dev/null | tail -1 || echo "venv present but pr-agent failed to start"; else echo "not installed (python venv missing)"; fi
+  printf '%-12s' "ponytail:";  echo "v$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$TOOLS/ponytail/package.json" | head -1) (skills: tools/ponytail/skills; install with: ccra agents <target>)"
+  printf '%-12s' "git:";       git --version 2>/dev/null || echo "MISSING (required by every tool; ocr needs >= 2.41)"
+  printf '%-12s' "python:";    "$CCRA_VENV/bin/python" --version 2>/dev/null || echo "venv missing"
+  printf '%-12s' "node:";      node --version 2>/dev/null || echo "missing (optional: ponytail lifecycle hooks)"
+  printf '%-12s' "claude:";    if command -v claude >/dev/null 2>&1; then claude --version 2>/dev/null | head -1; else echo "not on PATH (optional: ponytail / ocr delegate mode inside Claude Code)"; fi
+  echo
+  if [ -n "${OCR_LLM_URL:-}" ]; then echo "ocr LLM:      env OCR_LLM_URL=$OCR_LLM_URL model=${OCR_LLM_MODEL:-unset} protocol=${OCR_LLM_PROTOCOL:-default} (test: ccra ocr llm test)"
+  elif [ -f "$HOME/.opencodereview/config.json" ]; then echo "ocr LLM:      ~/.opencodereview/config.json (test: ccra ocr llm test)"
+  else echo "ocr LLM:      not configured (set OCR_LLM_URL/TOKEN/MODEL in .ccra/env, or: ccra ocr config provider; delegate mode needs none)"; fi
+  local key=unset; [ -n "${OPENAI__KEY:-}${ANTHROPIC__KEY:-}${OPENAI_API_KEY:-}${ANTHROPIC_API_KEY:-}" ] && key=set
+  echo "pr-agent LLM: model=${CONFIG__MODEL:-<default from configuration.toml>} key=$key api_base=${OPENAI__API_BASE:-unset}"
+  echo "GitLab:       url=${GITLAB__URL:-unset} token=$([ -n "${GITLAB__PERSONAL_ACCESS_TOKEN:-}" ] && echo set || echo unset)"
+  echo "GitHub:       token=$([ -n "${GITHUB__USER_TOKEN:-}" ] && echo set || echo unset)"
+}
+
+cmd_ocr()       { need_installed ocr;       exec "$CCRA_BIN/ocr" "$@"; }
+cmd_reviewdog() { need_installed reviewdog; exec "$CCRA_BIN/reviewdog" "$@"; }
+cmd_pr_agent()  { run_pr_agent "$@"; }
+
+cmd_agents() {
+  local target="${1:-}"; [ $# -gt 0 ] && shift
+  local P="$TOOLS/ponytail" O="$TOOLS/open-code-review"
+  case "$target" in
+    claude)
+      if command -v claude >/dev/null 2>&1 && claude plugin --help >/dev/null 2>&1; then
+        note "Registering local marketplaces with the claude CLI"
+        claude plugin marketplace add "$P" && claude plugin install ponytail@ponytail || true
+        claude plugin marketplace add "$O" && claude plugin install open-code-review@open-code-review || true
+        echo "Done. Restart Claude Code; then use /ponytail-review, /ponytail-audit, /open-code-review:review, /open-code-review:delegate-review"
+      else
+        cat <<MSG
+Run these inside Claude Code (one prompt each; local paths, no GitHub needed):
+  /plugin marketplace add $P
+  /plugin install ponytail@ponytail
+  /plugin marketplace add $O
+  /plugin install open-code-review@open-code-review
+Then: /ponytail-review, /ponytail-audit, /open-code-review:review, /open-code-review:delegate-review
+MSG
+      fi ;;
+    codex)
+      cat <<MSG
+Run:
+  codex plugin marketplace add $P
+  codex plugin add ponytail@ponytail
+  codex plugin marketplace add $O
+Then start codex, open /plugins, enable Open Code Review, and trust ponytail's two hooks under /hooks.
+MSG
+      ;;
+    cursor)
+      command -v node >/dev/null 2>&1 || die "node is required for ponytail's Cursor hooks"
+      node "$P/scripts/cursor-hooks.js" install "$@"
+      local dest="$HOME/.cursor/plugins/local/open-code-review"
+      mkdir -p "$dest" && cp -R "$O/plugins/open-code-review/." "$dest/"
+      echo "ponytail hooks installed; open-code-review plugin copied to $dest. Reload Cursor." ;;
+    opencode)
+      cat <<MSG
+Add to opencode.json (project or ~/.config/opencode/opencode.json):
+  { "plugins": ["$P/.opencode/plugins"] }
+open-code-review for OpenCode: see $O/plugins/open-code-review/opencode/
+MSG
+      ;;
+    skills)
+      local dest="${1:-}"; [ -n "$dest" ] || die "usage: ccra agents skills <dir>   (e.g. ~/.claude/skills or ./.claude/skills)"
+      mkdir -p "$dest"
+      cp -R "$P/skills/ponytail" "$P/skills/ponytail-review" "$P/skills/ponytail-audit" "$P/skills/ponytail-debt" "$P/skills/ponytail-gain" "$P/skills/ponytail-help" "$dest/"
+      cp -R "$O/skills/open-code-review" "$O/skills/open-code-review-delegate" "$dest/"
+      echo "Copied 8 skills into $dest" ;;
+    agents-md)
+      local dest="${1:-}"; [ -n "$dest" ] || die "usage: ccra agents agents-md <project dir>"
+      [ -e "$dest/AGENTS.md" ] && die "$dest/AGENTS.md exists; merge $P/AGENTS.md by hand"
+      cp "$P/AGENTS.md" "$dest/AGENTS.md" && echo "Copied ponytail AGENTS.md to $dest" ;;
+    *) echo "usage: ccra agents claude | codex | cursor | opencode | skills <dir> | agents-md <dir>" >&2; exit 2 ;;
+  esac
+}
+
+cmd_review() {
+  local from="" to="" commit="" reporter="local" pr_url="" local_target="" out="" filter_mode="nofilter" effort=""
+  local skip_ocr=0 skip_pr=0 skip_rd=0
+  local -a extra=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --from) from="$2"; shift 2 ;;
+      --to) to="$2"; shift 2 ;;
+      --commit|-c) commit="$2"; shift 2 ;;
+      --reporter|-r) reporter="$2"; shift 2 ;;
+      --pr-url|--mr-url) pr_url="$2"; shift 2 ;;
+      --local-target) local_target="$2"; shift 2 ;;
+      --out|-o) out="$2"; shift 2 ;;
+      --filter-mode) filter_mode="$2"; shift 2 ;;
+      --effort) effort="$2"; shift 2 ;;
+      --skip-ocr) skip_ocr=1; shift ;;
+      --skip-pr-agent) skip_pr=1; shift ;;
+      --skip-reviewdog) skip_rd=1; shift ;;
+      -h|--help) review_usage; return 0 ;;
+      --) shift; extra=("$@"); break ;;
+      *) die "unknown option: $1 (see ccra review --help)" ;;
+    esac
+  done
+  git rev-parse --show-toplevel >/dev/null 2>&1 || die "run ccra review from inside the git repository under review"
+  out="${out:-$PWD/.ccra-review}"; mkdir -p "$out"
+
+  # GitLab CI context
+  if [ -z "$from$commit" ] && [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
+    from="$CI_MERGE_REQUEST_DIFF_BASE_SHA"; to="${to:-HEAD}"
+  fi
+  if [ -z "$pr_url" ] && [ -n "${CI_MERGE_REQUEST_IID:-}" ] && [ -n "${CI_PROJECT_URL:-}" ]; then
+    pr_url="$CI_PROJECT_URL/-/merge_requests/$CI_MERGE_REQUEST_IID"
+  fi
+  local -a range=()
+  [ -n "$commit" ] && range+=(--commit "$commit")
+  [ -n "$from" ]   && range+=(--from "$from")
+  [ -n "$to" ]     && range+=(--to "$to")
+
+  if [ $skip_ocr -eq 0 ]; then
+    need_installed ocr
+    note "[1/3] open-code-review: AI diff review -> $out/ocr.sarif"
+    if ! "$CCRA_BIN/ocr" review --format sarif --output "$out/ocr.sarif" ${effort:+--effort "$effort"} "${range[@]}" "${extra[@]}"; then
+      echo "ocr review failed (no LLM configured? try: ccra ocr llm test). Continuing." >&2
+    fi
+  fi
+
+  if [ $skip_rd -eq 0 ]; then
+    if [ -s "$out/ocr.sarif" ]; then
+      need_installed reviewdog
+      note "[2/3] reviewdog: reporter=$reporter filter-mode=$filter_mode"
+      "$CCRA_BIN/reviewdog" -f=sarif -name=open-code-review -reporter="$reporter" -filter-mode="$filter_mode" \
+        < "$out/ocr.sarif" | tee "$out/reviewdog.out" || true
+    else
+      note "[2/3] reviewdog: skipped (no $out/ocr.sarif)"
+    fi
+  fi
+
+  if [ $skip_pr -eq 0 ]; then
+    if [ -n "$pr_url" ]; then
+      note "[3/3] pr-agent: /review on $pr_url"
+      run_pr_agent --pr_url "$pr_url" review
+    elif [ -n "$local_target" ]; then
+      note "[3/3] pr-agent: /review of HEAD vs local branch $local_target (writes ./review.md)"
+      CONFIG__GIT_PROVIDER=local run_pr_agent --pr_url "$local_target" review
+    else
+      note "[3/3] pr-agent: skipped (pass --pr-url URL or --local-target BRANCH)"
+    fi
+  fi
+  note "outputs: $out"
+}
+
+cmd_lint() {
+  need_installed reviewdog
+  local conf="${CCRA_REVIEWDOG_CONF:-}"
+  if [ -z "$conf" ]; then
+    if [ -f .reviewdog.yml ]; then conf=.reviewdog.yml; else conf="$CCRA_ROOT/config/reviewdog.yml"; fi
+  fi
+  exec "$CCRA_BIN/reviewdog" -conf="$conf" "$@"
+}
+
+cmd="${1:-}"; [ $# -gt 0 ] && shift
+case "$cmd" in
+  install)                 cmd_install "$@" ;;
+  doctor)                  cmd_doctor ;;
+  verify)                  cmd_verify "$@" ;;
+  version|--version|-V)    cmd_version ;;
+  ocr)                     cmd_ocr "$@" ;;
+  reviewdog)               cmd_reviewdog "$@" ;;
+  pr-agent|pr_agent)       cmd_pr_agent "$@" ;;
+  agents|ponytail)         cmd_agents "$@" ;;
+  review)                  cmd_review "$@" ;;
+  lint)                    cmd_lint "$@" ;;
+  ""|help|-h|--help)       usage ;;
+  *)                       die "unknown command: $cmd (try: ccra --help)" ;;
+esac

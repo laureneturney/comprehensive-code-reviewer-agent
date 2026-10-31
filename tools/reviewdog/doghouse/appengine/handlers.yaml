@@ -1,0 +1,14 @@
+handlers:
+- url: /secret/*
+  secure: always
+  script: auto
+
+- url: /static
+  static_dir: static
+
+- url: /.*
+  script: auto
+
+- url: /_ah/warmup
+  script: auto
+
