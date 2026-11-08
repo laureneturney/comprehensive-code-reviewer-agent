@@ -31,6 +31,13 @@ Each report folder gets `meta.json`, `lint-ruff-*.txt`, `ocr-delegate-preview.js
 `ccra audit` alone (no agent) still produces everything except `REVIEW.md`; hand `AUDIT-BRIEF.md`
 to any coding agent to finish.
 
+GitHub Copilot: `ccra agents copilot` registers the same plugins with Copilot CLI (commands become
+`/ccra:ccra-audit`, `/ccra:ccra-review`, `/ponytail:ponytail-review`). For Copilot in VS Code and
+the Copilot coding agent, copy the skills into the project (`ccra agents skills <project>/.github/skills`)
+or your personal skills folder (`ccra agents skills ~/.copilot/skills`), and drop `AGENTS.md` in the
+project (`ccra agents agents-md <project>`). Copilot does not set `CLAUDE_PLUGIN_ROOT`, so the skills
+expect `ccra` on PATH.
+
 Everything after `--` goes to `ocr review` unchanged, e.g.
 `ccra review -- --background-file docs/requirements.md --exclude '**/generated/**'`.
 
@@ -85,6 +92,7 @@ and run with the same venv: `PYTHONPATH=tools/pr-agent .ccra/venv/bin/python -m 
 
 ```bash
 ccra agents claude            # register tools/ponytail and tools/open-code-review as local plugin marketplaces
+ccra agents copilot           # GitHub Copilot CLI plugins; prints the skills route for VS Code Copilot
 ccra agents codex             # prints the codex commands with local paths
 ccra agents cursor            # installs ponytail hooks + ocr plugin for Cursor
 ccra agents opencode          # prints the opencode.json snippet

@@ -13,6 +13,8 @@ network is needed at install or run time except the LLM endpoint and git host yo
 | Audit a whole repository from the terminal | `ccra audit <repo> --out <dir>` (deterministic layer + a brief for the agent that writes the audit) |
 | Classic linters into an MR/PR | `ccra lint -reporter=gitlab-mr-discussion` |
 | Use it inside Claude Code | `ccra agents claude` (or `/plugin marketplace add <this repo path>` then `/plugin install ccra@ccra`), then `/ccra-audit [path]`, `/ccra-review [range]`, or ask for the `code-reviewer` agent |
+| Use it inside GitHub Copilot CLI | `ccra agents copilot` (or `copilot plugin marketplace add <this repo path>` then `copilot plugin install ccra@ccra`), then `/ccra:ccra-audit`, `/ccra:ccra-review` |
+| Use it inside Copilot in VS Code or the Copilot coding agent | `ccra agents skills <project>/.github/skills` and `ccra agents agents-md <project>`; `ccra` must be on PATH |
 | Use it inside Codex, Cursor, OpenCode | `ccra agents codex \| cursor \| opencode` prints or applies the steps |
 | Any agent that reads skills | `ccra agents skills <dir>` copies the ccra, ponytail and ocr skills into `<dir>` |
 

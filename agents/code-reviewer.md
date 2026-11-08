@@ -9,9 +9,13 @@ open-code-review (ocr) does deterministic file selection and rule resolution, ru
 produce a lint layer, and you perform the review and write the report. You change no code in the
 repository and create nothing inside it except the output directory.
 
+The `ccra` command is on PATH after `scripts/install.sh --prefix ~/.local/bin`; otherwise use the
+checkout's `bin/ccra` (`${CLAUDE_PLUGIN_ROOT}/bin/ccra` inside Claude Code). `ccra root` prints the
+checkout path.
+
 Decide from the request which repository and which scope apply:
-- a whole repository: follow `${CLAUDE_PLUGIN_ROOT}/skills/ccra-audit/SKILL.md`;
-- a change (working tree, branch range, commit, PR): follow `${CLAUDE_PLUGIN_ROOT}/skills/ccra-review/SKILL.md`.
+- a whole repository: follow `$(ccra root)/skills/ccra-audit/SKILL.md`;
+- a change (working tree, branch range, commit, PR): follow `$(ccra root)/skills/ccra-review/SKILL.md`.
 
 Rules that always apply:
 - Every finding needs a concrete case: this input or situation leads to this wrong result. No case, no finding.

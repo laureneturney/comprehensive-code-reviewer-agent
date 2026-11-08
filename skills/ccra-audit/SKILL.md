@@ -5,7 +5,7 @@ description: >
   open-code-review (ocr) in delegate mode selects files and attaches review rules, ruff through
   reviewdog adds a lint layer, and you perform the review following ponytail-audit and write
   REVIEW.md. Use for "audit this repo", "review the whole codebase", "run the code reviewer on
-  <path>", "code review of <repo>", /ccra-audit [path] [--out DIR].
+  <path>", "code review of <repo>", /ccra-audit [path] [--out DIR] (Copilot CLI: /ccra:ccra-audit).
 ---
 
 # ccra-audit: whole-repository code review
@@ -14,7 +14,13 @@ Arguments: an optional repository path (default: the git repository you are in) 
 `--out DIR` (default: `<repo>/.ccra-review`). This is a report. Change no code in the repository
 and create no files inside it except under the output directory.
 
-The `ccra` command lives at `${CLAUDE_PLUGIN_ROOT}/bin/ccra`. If `ccra doctor` says ocr or
+## Finding the tool
+
+Use the `ccra` command. It is on PATH after `scripts/install.sh --prefix ~/.local/bin`. If it is
+not, use the checkout's `bin/ccra`: inside Claude Code that is `${CLAUDE_PLUGIN_ROOT}/bin/ccra`,
+inside GitHub Copilot CLI `${PLUGIN_ROOT}/bin/ccra`; otherwise ask the user where the
+comprehensive-code-reviewer-agent checkout is. `ccra root` prints the checkout path; the bundled
+ponytail procedures are at `$(ccra root)/tools/ponytail/skills/`. If `ccra doctor` says ocr or
 reviewdog is not installed, run `ccra install` once (offline, from vendored assets).
 
 ## 1. Deterministic layer
@@ -31,7 +37,7 @@ HEAD, plus exclusions), `ocr-rule-groups.json` (the review checklist ocr attache
 
 ## 2. Review
 
-Read `${CLAUDE_PLUGIN_ROOT}/tools/ponytail/skills/ponytail-audit/SKILL.md` and follow it exactly:
+Read `$(ccra root)/tools/ponytail/skills/ponytail-audit/SKILL.md` and follow it exactly:
 map first (README, build and deploy config, dependencies, entry points, tests, expected load),
 trace the main flows end to end, then look for bugs, risks, scale problems, missing tests, speed and
 lean. Every finding needs a concrete case. At most 20 findings. Plain English.

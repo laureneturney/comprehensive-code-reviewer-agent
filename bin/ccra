@@ -64,14 +64,15 @@ Setup
   doctor                Show what is installed and configured
   verify                Verify checksums of vendored binaries and wheels
   version               Print ccra and bundled tool versions
+  root                  Print the ccra checkout path (skills use it to find bundled files)
 
 Tools (pass-through; `ccra <tool> --help` shows the tool's own help)
   ocr <args>            open-code-review: AI diff review   (review | scan | delegate | config | rules | llm test)
   reviewdog <args>      reviewdog: post linter/SARIF findings to the terminal, a GitLab MR or a GitHub PR
   pr-agent <args>       pr-agent: AI PR/MR review, describe, improve, ask, doctor
   agents <target>       Register the ccra, ponytail and open-code-review skills with a coding agent:
-                          claude | codex | cursor | opencode | skills <dir> | agents-md <dir>
-                        In Claude Code this gives /ccra-audit, /ccra-review and the code-reviewer agent.
+                          claude | copilot | codex | cursor | opencode | skills <dir> | agents-md <dir>
+                        Claude Code: /ccra-audit, /ccra-review, code-reviewer agent.  Copilot CLI: /ccra:ccra-audit, /ccra:ccra-review.
 
 Pipelines (run from the root of the repository under review)
   review [opts]         ocr AI review -> SARIF -> reviewdog reporter; plus pr-agent when an MR/PR URL or local target is given
@@ -120,6 +121,7 @@ run_pr_agent() {
   PYTHONPATH="$TOOLS/pr-agent${PYTHONPATH:+:$PYTHONPATH}" "$CCRA_VENV/bin/python" -m pr_agent.cli "$@"
 }
 
+cmd_root()    { printf '%s\n' "$CCRA_ROOT"; }
 cmd_install() { exec bash "$CCRA_ROOT/scripts/install.sh" "$@"; }
 cmd_audit()   { exec bash "$CCRA_ROOT/scripts/audit-prep.sh" "$@"; }
 cmd_verify()  { exec bash "$CCRA_ROOT/scripts/verify-assets.sh" "$@"; }
@@ -181,6 +183,35 @@ Then: /ccra-audit [path], /ccra-review [--from A --to B], the code-reviewer agen
       /ponytail-review, /ponytail-audit, /open-code-review:review, /open-code-review:delegate-review
 MSG
       fi ;;
+    copilot)
+      # GitHub Copilot CLI reads the same marketplace/plugin layout; commands are namespaced by plugin name.
+      if command -v copilot >/dev/null 2>&1 && copilot plugin --help >/dev/null 2>&1; then
+        note "Registering local marketplaces with the copilot CLI"
+        copilot plugin marketplace add "$CCRA_ROOT" && copilot plugin install ccra@ccra || true
+        copilot plugin marketplace add "$P" && copilot plugin install ponytail@ponytail || true
+        copilot plugin marketplace add "$O" && copilot plugin install open-code-review@open-code-review || true
+        echo "Done. Start a new copilot session; then use /ccra:ccra-audit, /ccra:ccra-review, /ponytail:ponytail-review, /ponytail:ponytail-audit"
+      else
+        cat <<MSG
+GitHub Copilot CLI (plugin route; local paths, no GitHub needed):
+  copilot plugin marketplace add $CCRA_ROOT
+  copilot plugin install ccra@ccra
+  copilot plugin marketplace add $P
+  copilot plugin install ponytail@ponytail
+  copilot plugin marketplace add $O
+  copilot plugin install open-code-review@open-code-review
+Then: /ccra:ccra-audit [path], /ccra:ccra-review [--from A --to B], /ponytail:ponytail-review, /ponytail:ponytail-audit
+MSG
+      fi
+      cat <<MSG
+
+Copilot in VS Code / Copilot coding agent (skills route, Agent Skills standard):
+  ccra agents skills ~/.copilot/skills            # personal skills for Copilot CLI
+  ccra agents skills <project>/.github/skills     # project skills for VS Code Copilot and the coding agent
+  ccra agents agents-md <project>                 # AGENTS.md is read as repository instructions
+Make sure \`ccra\` is on PATH for Copilot: scripts/install.sh --prefix ~/.local/bin
+MSG
+      ;;
     codex)
       cat <<MSG
 Run:
@@ -216,7 +247,7 @@ MSG
       local dest="${1:-}"; [ -n "$dest" ] || die "usage: ccra agents agents-md <project dir>"
       [ -e "$dest/AGENTS.md" ] && die "$dest/AGENTS.md exists; merge $P/AGENTS.md by hand"
       cp "$P/AGENTS.md" "$dest/AGENTS.md" && echo "Copied ponytail AGENTS.md to $dest" ;;
-    *) echo "usage: ccra agents claude | codex | cursor | opencode | skills <dir> | agents-md <dir>" >&2; exit 2 ;;
+    *) echo "usage: ccra agents claude | copilot | codex | cursor | opencode | skills <dir> | agents-md <dir>" >&2; exit 2 ;;
   esac
 }
 
@@ -306,6 +337,7 @@ case "$cmd" in
   doctor)                  cmd_doctor ;;
   verify)                  cmd_verify "$@" ;;
   version|--version|-V)    cmd_version ;;
+  root)                    cmd_root ;;
   ocr)                     cmd_ocr "$@" ;;
   reviewdog)               cmd_reviewdog "$@" ;;
   pr-agent|pr_agent)       cmd_pr_agent "$@" ;;

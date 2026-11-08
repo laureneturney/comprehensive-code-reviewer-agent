@@ -58,7 +58,15 @@ then `/plugin install ccra@ccra`. You then have `/ccra-audit [path] [--out dir]`
 ("use the code-reviewer agent on ~/src/foo"). These run ocr in delegate mode, so no LLM endpoint is
 needed: Claude Code is the model. The report lands in `<repo>/.ccra-review/REVIEW.md` (or `--out`).
 
-**3. Other agents.** `ccra agents codex | cursor | opencode` prints or applies the equivalent steps;
+**3. GitHub Copilot.** Copilot CLI reads the same plugin layout: `ccra agents copilot` (or
+`copilot plugin marketplace add /path/to/comprehensive-code-reviewer-agent` then
+`copilot plugin install ccra@ccra`), after which the commands are `/ccra:ccra-audit` and `/ccra:ccra-review`.
+Copilot in VS Code and the Copilot coding agent use the Agent Skills standard instead:
+`ccra agents skills <project>/.github/skills` (or `~/.copilot/skills` for Copilot CLI personal skills) and
+`AGENTS.md` as repository instructions. Put `ccra` on PATH (`scripts/install.sh --prefix ~/.local/bin`) so
+Copilot can run it.
+
+**4. Other agents.** `ccra agents codex | cursor | opencode` prints or applies the equivalent steps;
 `ccra agents skills <dir>` copies the ten skills (ccra, ponytail, open-code-review) as plain `SKILL.md`
 folders for any agent that reads them; [AGENTS.md](AGENTS.md) at the root is picked up by agents that
 read that file.
