@@ -37,10 +37,38 @@ ccra agents claude                                      # ponytail + ocr skills 
 Tokens and model settings live in `.ccra/env` (template: [config/ccra.env.example](config/ccra.env.example)).
 One `GITLAB_URL` + `GITLAB_TOKEN` (or `GITHUB_TOKEN`) feeds both reviewdog and pr-agent.
 
+## Calling the reviewer
+
+There are three doors. All of them work offline once `scripts/install.sh` has run.
+
+**1. Command line.** `ccra review` reviews a change (working tree, `--from A --to B`, or `--commit SHA`)
+and publishes through reviewdog; `ccra audit <repo> --out <dir>` prepares a whole-repository audit
+(ocr delegate preview and rule groups, ruff through reviewdog, and an `AUDIT-BRIEF.md`); `ccra lint`
+runs classic linters into an MR/PR. Both AI paths need an LLM endpoint configured for ocr (`ccra doctor`
+tells you), or a coding agent to act as the model in delegate mode, which is door 2.
+
+**2. Inside Claude Code** (this repository is a plugin marketplace; nothing is fetched from GitHub):
+
+```
+ccra agents claude            # registers ccra, ponytail and open-code-review from the local checkout
+```
+or, inside Claude Code, one prompt each: `/plugin marketplace add /path/to/comprehensive-code-reviewer-agent`
+then `/plugin install ccra@ccra`. You then have `/ccra-audit [path] [--out dir]` for a whole repository,
+`/ccra-review [--from A --to B | --commit SHA]` for a change, and a `code-reviewer` subagent
+("use the code-reviewer agent on ~/src/foo"). These run ocr in delegate mode, so no LLM endpoint is
+needed: Claude Code is the model. The report lands in `<repo>/.ccra-review/REVIEW.md` (or `--out`).
+
+**3. Other agents.** `ccra agents codex | cursor | opencode` prints or applies the equivalent steps;
+`ccra agents skills <dir>` copies the ten skills (ccra, ponytail, open-code-review) as plain `SKILL.md`
+folders for any agent that reads them; [AGENTS.md](AGENTS.md) at the root is picked up by agents that
+read that file.
+
 ## What is in the box
 
 ```
-bin/ccra                  front-door CLI (install, doctor, review, lint, ocr, reviewdog, pr-agent, agents)
+bin/ccra                  front-door CLI (install, doctor, review, audit, lint, ocr, reviewdog, pr-agent, agents)
+skills/, agents/          /ccra-audit, /ccra-review and the code-reviewer agent (Claude Code plugin: .claude-plugin/)
+AGENTS.md                 entry point for any coding agent; .agents/plugins/marketplace.json for Codex
 scripts/install.sh        offline installer           scripts/verify-assets.sh   checksum check
 scripts/fetch-offline-assets.sh / sync-upstream.sh    online-side refresh scripts
 config/                   env template, reviewdog runners, per-repo samples for pr-agent and ocr
@@ -50,6 +78,7 @@ docs/                     ARCHITECTURE, OFFLINE_INSTALL, USAGE, UPSTREAM
 tools/                    verbatim upstream sources (only .git removed)
 vendor/binaries/          official ocr + reviewdog release binaries: linux amd64/arm64, macOS amd64/arm64
 vendor/wheels/pr-agent/   pr-agent's locked dependencies as wheels: CPython 3.12, linux x86_64 + macOS arm64
+vendor/wheels/tools/      ruff for linux x86_64/arm64 and macOS arm64 (lint layer of ccra lint / ccra audit)
 vendor/MANIFEST.json      exact upstream commits/tags and what was vendored
 ```
 

@@ -17,6 +17,7 @@ check "$ROOT/vendor/binaries/open-code-review" SHA256SUMS-gz.txt
 check "$ROOT/vendor/binaries/reviewdog" SHA256SUMS.txt
 check_upstream "$ROOT/vendor/binaries/reviewdog" checksums.txt
 check "$ROOT/vendor/wheels/pr-agent" SHA256SUMS.txt
+check "$ROOT/vendor/wheels/tools" SHA256SUMS.txt
 if [ $DEEP -eq 1 ]; then
   d="$ROOT/vendor/binaries/open-code-review"; tmp="$(mktemp -d)"
   for gz in "$d"/opencodereview-*.gz; do gunzip -c "$gz" > "$tmp/$(basename "${gz%.gz}")"; done

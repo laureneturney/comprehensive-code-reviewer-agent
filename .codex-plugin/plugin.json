@@ -1,0 +1,28 @@
+{
+  "name": "ccra",
+  "version": "0.2.0",
+  "description": "Comprehensive code reviewer: whole-repo audits and change reviews driving open-code-review in delegate mode, ruff through reviewdog, and ponytail's review procedures. Works offline.",
+  "author": {
+    "name": "Lauren Turney",
+    "url": "https://github.com/laureneturney"
+  },
+  "homepage": "https://github.com/laureneturney/comprehensive-code-reviewer-agent",
+  "repository": "https://github.com/laureneturney/comprehensive-code-reviewer-agent",
+  "license": "MIT",
+  "keywords": ["code-review", "audit", "reviewdog", "open-code-review", "ponytail"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Comprehensive Code Reviewer",
+    "shortDescription": "Whole-repo audits and change reviews, offline.",
+    "longDescription": "Adds the ccra-audit and ccra-review skills. They run the bundled open-code-review CLI in delegate mode for file selection and rules, ruff through reviewdog for lint, and apply ponytail's audit and review procedures; the agent writes REVIEW.md.",
+    "developerName": "Lauren Turney",
+    "category": "Developer Tools",
+    "capabilities": ["Read"],
+    "websiteURL": "https://github.com/laureneturney/comprehensive-code-reviewer-agent",
+    "defaultPrompt": [
+      "Audit this repository with ccra-audit.",
+      "Review my current changes with ccra-review.",
+      "Review this branch against main with ccra-review."
+    ]
+  }
+}

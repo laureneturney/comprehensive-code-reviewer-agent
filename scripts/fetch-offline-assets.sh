@@ -58,7 +58,7 @@ if [ $DO_BIN -eq 1 ]; then
 fi
 
 if [ $DO_WHL -eq 1 ]; then
-  W="$ROOT/vendor/wheels/pr-agent"; mkdir -p "$W"
+  W="$ROOT/vendor/wheels/pr-agent"; T="$ROOT/vendor/wheels/tools"; mkdir -p "$W" "$T"
   if [ $RELOCK -eq 1 ] || [ ! -f "$W/requirements.lock.txt" ]; then
     command -v uv >/dev/null 2>&1 || { echo "uv >= 0.13.5 is required for --relock" >&2; exit 1; }
     ( cd "$ROOT/tools/pr-agent" && uv export --frozen --no-dev --no-hashes --no-emit-project --extra github --extra gitlab --format requirements-txt -o "$W/requirements.lock.txt" )
@@ -78,9 +78,11 @@ if [ $DO_WHL -eq 1 ]; then
       args=(); for t in "${tags[@]}"; do args+=(--platform "$t"); done
       $PIP download -r "$W/requirements.lock.txt" -d "$W" --only-binary=:all: "${args[@]}" --python-version "$pv" --implementation cp --abi "$abi" --abi abi3 --abi none -q
       $PIP download pip setuptools wheel -d "$W" --only-binary=:all: --python-version "$pv" -q
+      $PIP download ruff -d "$T" --only-binary=:all: "${args[@]}" --python-version "$pv" --implementation cp --abi "$abi" --abi abi3 --abi none -q
     done
   done
   ( cd "$W" && { sha256sum *.whl 2>/dev/null || shasum -a 256 *.whl; } > SHA256SUMS.txt )
+  ( cd "$T" && { sha256sum *.whl 2>/dev/null || shasum -a 256 *.whl; } > SHA256SUMS.txt )
   echo "wheelhouse: $(ls "$W"/*.whl | wc -l | tr -d ' ') wheels, $(du -sh "$W" | cut -f1)"
 fi
 echo "done. Review 'git status', then commit vendor/ and update vendor/MANIFEST.json if versions changed."

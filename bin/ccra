@@ -45,6 +45,10 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
   export GITHUB__USER_TOKEN="${GITHUB__USER_TOKEN:-$GITHUB_TOKEN}"
 fi
 
+# Vendored CLI tools (ruff in the venv, the ocr/reviewdog binaries) become visible to runners and skills.
+[ -d "$CCRA_BIN" ] && export PATH="$PATH:$CCRA_BIN"
+[ -d "$CCRA_VENV/bin" ] && export PATH="$PATH:$CCRA_VENV/bin"
+
 die()  { echo "ccra: $*" >&2; exit 1; }
 note() { echo "==> $*" >&2; }
 need_installed() { [ -x "$CCRA_BIN/$1" ] || die "$1 is not installed. Run: ccra install"; }
@@ -65,11 +69,14 @@ Tools (pass-through; `ccra <tool> --help` shows the tool's own help)
   ocr <args>            open-code-review: AI diff review   (review | scan | delegate | config | rules | llm test)
   reviewdog <args>      reviewdog: post linter/SARIF findings to the terminal, a GitLab MR or a GitHub PR
   pr-agent <args>       pr-agent: AI PR/MR review, describe, improve, ask, doctor
-  agents <target>       Install ponytail + open-code-review skills into a coding agent:
+  agents <target>       Register the ccra, ponytail and open-code-review skills with a coding agent:
                           claude | codex | cursor | opencode | skills <dir> | agents-md <dir>
+                        In Claude Code this gives /ccra-audit, /ccra-review and the code-reviewer agent.
 
 Pipelines (run from the root of the repository under review)
   review [opts]         ocr AI review -> SARIF -> reviewdog reporter; plus pr-agent when an MR/PR URL or local target is given
+  audit [REPO] [opts]   Whole-repo audit, deterministic layer: ocr delegate preview + rule groups, ruff via reviewdog,
+                        and AUDIT-BRIEF.md for the agent that writes REVIEW.md (/ccra-audit does both steps)
   lint [opts]           Run the linters in config/reviewdog.yml through reviewdog
 
 Environment (put in .ccra/env; see config/ccra.env.example)
@@ -114,6 +121,7 @@ run_pr_agent() {
 }
 
 cmd_install() { exec bash "$CCRA_ROOT/scripts/install.sh" "$@"; }
+cmd_audit()   { exec bash "$CCRA_ROOT/scripts/audit-prep.sh" "$@"; }
 cmd_verify()  { exec bash "$CCRA_ROOT/scripts/verify-assets.sh" "$@"; }
 
 cmd_version() {
@@ -156,22 +164,28 @@ cmd_agents() {
     claude)
       if command -v claude >/dev/null 2>&1 && claude plugin --help >/dev/null 2>&1; then
         note "Registering local marketplaces with the claude CLI"
+        claude plugin marketplace add "$CCRA_ROOT" && claude plugin install ccra@ccra || true
         claude plugin marketplace add "$P" && claude plugin install ponytail@ponytail || true
         claude plugin marketplace add "$O" && claude plugin install open-code-review@open-code-review || true
-        echo "Done. Restart Claude Code; then use /ponytail-review, /ponytail-audit, /open-code-review:review, /open-code-review:delegate-review"
+        echo "Done. Restart Claude Code; then use /ccra-audit, /ccra-review (or ask for the code-reviewer agent), /ponytail-review, /ponytail-audit, /open-code-review:review, /open-code-review:delegate-review"
       else
         cat <<MSG
 Run these inside Claude Code (one prompt each; local paths, no GitHub needed):
+  /plugin marketplace add $CCRA_ROOT
+  /plugin install ccra@ccra
   /plugin marketplace add $P
   /plugin install ponytail@ponytail
   /plugin marketplace add $O
   /plugin install open-code-review@open-code-review
-Then: /ponytail-review, /ponytail-audit, /open-code-review:review, /open-code-review:delegate-review
+Then: /ccra-audit [path], /ccra-review [--from A --to B], the code-reviewer agent,
+      /ponytail-review, /ponytail-audit, /open-code-review:review, /open-code-review:delegate-review
 MSG
       fi ;;
     codex)
       cat <<MSG
 Run:
+  codex plugin marketplace add $CCRA_ROOT
+  codex plugin add ccra@ccra
   codex plugin marketplace add $P
   codex plugin add ponytail@ponytail
   codex plugin marketplace add $O
@@ -196,7 +210,8 @@ MSG
       mkdir -p "$dest"
       cp -R "$P/skills/ponytail" "$P/skills/ponytail-review" "$P/skills/ponytail-audit" "$P/skills/ponytail-debt" "$P/skills/ponytail-gain" "$P/skills/ponytail-help" "$dest/"
       cp -R "$O/skills/open-code-review" "$O/skills/open-code-review-delegate" "$dest/"
-      echo "Copied 8 skills into $dest" ;;
+      cp -R "$CCRA_ROOT/skills/ccra-audit" "$CCRA_ROOT/skills/ccra-review" "$dest/"
+      echo "Copied 10 skills into $dest" ;;
     agents-md)
       local dest="${1:-}"; [ -n "$dest" ] || die "usage: ccra agents agents-md <project dir>"
       [ -e "$dest/AGENTS.md" ] && die "$dest/AGENTS.md exists; merge $P/AGENTS.md by hand"
@@ -296,6 +311,7 @@ case "$cmd" in
   pr-agent|pr_agent)       cmd_pr_agent "$@" ;;
   agents|ponytail)         cmd_agents "$@" ;;
   review)                  cmd_review "$@" ;;
+  audit)                   cmd_audit "$@" ;;
   lint)                    cmd_lint "$@" ;;
   ""|help|-h|--help)       usage ;;
   *)                       die "unknown command: $cmd (try: ccra --help)" ;;

@@ -115,6 +115,14 @@ install: pip could not satisfy the lockfile from the vendored wheelhouse.
 MSG
         exit 1
       fi
+      # Vendored ruff (vendor/wheels/tools) powers `ccra lint` and `ccra audit` offline.
+      if ls "$ROOT/vendor/wheels/tools"/ruff-*.whl >/dev/null 2>&1; then
+        if "$VPY" -m pip install --no-index --find-links "$ROOT/vendor/wheels/tools" ruff -q 2>/dev/null; then
+          note "ruff $("$CCRA_HOME/venv/bin/ruff" --version 2>/dev/null | awk '{print $2}') installed into the venv (ccra lint / ccra audit)"
+        else
+          note "no ruff wheel for this platform; ccra lint/audit will use ruff from PATH or uvx"
+        fi
+      fi
       # Editable install (no deps, no build isolation) so `pr-agent --version` and package
       # metadata resolve from any directory. Falls back to plain PYTHONPATH if it fails.
       if ! "$VPY" -m pip install --no-index --no-deps --no-build-isolation -e "$ROOT/tools/pr-agent" -q 2>/dev/null; then

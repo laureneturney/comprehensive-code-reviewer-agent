@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "ccra",
+  "description": "Comprehensive code reviewer agent: offline bundle of open-code-review, pr-agent, reviewdog and ponytail with one front door.",
+  "owner": {
+    "name": "Lauren Turney",
+    "url": "https://github.com/laureneturney"
+  },
+  "plugins": [
+    {
+      "name": "ccra",
+      "source": "./",
+      "description": "/ccra-audit, /ccra-review and the code-reviewer agent. Run `ccra install` once; everything else is offline.",
+      "version": "0.2.0",
+      "category": "productivity"
+    }
+  ]
+}

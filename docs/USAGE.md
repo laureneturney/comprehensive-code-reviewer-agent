@@ -13,7 +13,23 @@ ccra review --commit abc123                   # review one commit
 ccra review --from main --to HEAD --local-target main      # + pr-agent review.md, no hosting token needed
 ccra review --reporter gitlab-mr-discussion --pr-url https://gitlab.example.com/g/p/-/merge_requests/42
 ccra lint -reporter=local -diff="git diff main"            # classic linters through reviewdog
+ccra audit ~/src/foo --out ~/code-reviews/foo              # whole-repo audit: deterministic layer + AUDIT-BRIEF.md
 ```
+
+## Inside a coding agent (delegate mode, no LLM endpoint needed)
+
+```bash
+ccra agents claude      # registers this repo, ponytail and open-code-review as local plugin marketplaces
+```
+Then in Claude Code: `/ccra-audit [path] [--out DIR]` audits a whole repository and writes
+`REVIEW.md`; `/ccra-review [--from A --to B | --commit SHA]` reviews a change; "use the
+code-reviewer agent on <path>" runs the same procedure as a subagent. The skills live in
+`skills/ccra-audit/SKILL.md` and `skills/ccra-review/SKILL.md`; the agent in `agents/code-reviewer.md`.
+Each report folder gets `meta.json`, `lint-ruff-*.txt`, `ocr-delegate-preview.json`,
+`ocr-rule-groups.json`, `AUDIT-BRIEF.md` and the `REVIEW.md` the agent writes.
+
+`ccra audit` alone (no agent) still produces everything except `REVIEW.md`; hand `AUDIT-BRIEF.md`
+to any coding agent to finish.
 
 Everything after `--` goes to `ocr review` unchanged, e.g.
 `ccra review -- --background-file docs/requirements.md --exclude '**/generated/**'`.

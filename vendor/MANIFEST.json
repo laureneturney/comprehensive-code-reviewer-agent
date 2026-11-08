@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-31",
+  "generated": "2026-11-08",
   "generated_by": "scripts/sync-upstream.sh + scripts/fetch-offline-assets.sh (initial import done by hand on macOS arm64)",
   "tools": [
     {
@@ -59,13 +59,23 @@
     "open-code-review": {
       "version": "v1.13.3",
       "source": "https://github.com/alibaba/open-code-review/releases/tag/v1.13.3",
-      "platforms": ["linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64"],
+      "platforms": [
+        "linux-amd64",
+        "linux-arm64",
+        "darwin-amd64",
+        "darwin-arm64"
+      ],
       "format": "gzip of the raw release binary; sha256sum.txt covers the uncompressed binary, SHA256SUMS-gz.txt covers the .gz"
     },
     "reviewdog": {
       "version": "v0.21.2",
       "source": "https://github.com/reviewdog/reviewdog/releases/tag/v0.21.2",
-      "platforms": ["Linux_x86_64", "Linux_arm64", "Darwin_x86_64", "Darwin_arm64"],
+      "platforms": [
+        "Linux_x86_64",
+        "Linux_arm64",
+        "Darwin_x86_64",
+        "Darwin_arm64"
+      ],
       "format": "upstream .tar.gz archives; checksums.txt is upstream, SHA256SUMS.txt is local"
     }
   },
@@ -73,10 +83,54 @@
     "pr-agent": {
       "lock_source": "tools/pr-agent/uv.lock (uv 0.13.5 export, --no-dev --extra github --extra gitlab)",
       "python": "3.12 (cp312; abi3 wheels also work on newer CPython)",
-      "platforms": ["manylinux_2_17..2_34 x86_64", "macosx_11_0+ arm64"],
-      "extras_included": ["github", "gitlab"],
-      "extras_not_included": ["bitbucket", "azure", "codecommit", "gitea", "google", "mosaico", "lambda"],
+      "platforms": [
+        "manylinux_2_17..2_34 x86_64",
+        "macosx_11_0+ arm64"
+      ],
+      "extras_included": [
+        "github",
+        "gitlab"
+      ],
+      "extras_not_included": [
+        "bitbucket",
+        "azure",
+        "codecommit",
+        "gitea",
+        "google",
+        "mosaico",
+        "lambda"
+      ],
       "how_to_add_platforms": "scripts/fetch-offline-assets.sh --wheels-only --platform <tag> --python-version <x.y>"
+    },
+    "tools": {
+      "ruff": {
+        "version": "0.17.4",
+        "python": "py3 (pure launcher wheel, platform-specific binary)",
+        "platforms": [
+          "manylinux_2_17 x86_64",
+          "manylinux_2_17 aarch64",
+          "macosx_11_0 arm64"
+        ],
+        "purpose": "lint layer for `ccra lint` and `ccra audit`; installed into the venv by scripts/install.sh"
+      }
     }
+  },
+  "agent_entry_points": {
+    "claude_code": {
+      "marketplace": ".claude-plugin/marketplace.json",
+      "plugin": ".claude-plugin/plugin.json",
+      "skills": [
+        "skills/ccra-audit",
+        "skills/ccra-review"
+      ],
+      "agents": [
+        "agents/code-reviewer.md"
+      ],
+      "install": "ccra agents claude  (or /plugin marketplace add <repo path>; /plugin install ccra@ccra)"
+    },
+    "codex": {
+      "marketplace": ".agents/plugins/marketplace.json"
+    },
+    "any_agent": "AGENTS.md at the repo root; `ccra agents skills <dir>` copies all skills"
   }
 }
