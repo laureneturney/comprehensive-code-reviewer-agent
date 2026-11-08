@@ -85,16 +85,18 @@ docker/Dockerfile         all-in-one image built only from vendored assets
 docs/                     ARCHITECTURE, OFFLINE_INSTALL, USAGE, UPSTREAM
 tools/                    verbatim upstream sources (only .git removed)
 vendor/binaries/          official ocr + reviewdog release binaries: linux amd64/arm64, macOS amd64/arm64
-vendor/wheels/pr-agent/   pr-agent's locked dependencies as wheels: CPython 3.12, linux x86_64 + macOS arm64
-vendor/wheels/tools/      ruff for linux x86_64/arm64 and macOS arm64 (lint layer of ccra lint / ccra audit)
+vendor/wheels/pr-agent/   pr-agent's locked dependencies as wheels: CPython 3.12/3.13/3.14 on linux x86_64/arm64 and macOS arm64
+vendor/wheels/tools/      ruff for the same platforms (lint layer of ccra lint / ccra audit)
 vendor/MANIFEST.json      exact upstream commits/tags and what was vendored
 ```
 
 ## Requirements on the target machine
 
-git >= 2.41, bash, tar/gzip, and for pr-agent a Python >= 3.12 with `venv`. Linux x86_64/arm64
-or macOS. Node is optional (ponytail hooks). Other Python versions or platforms need a one-off
-wheel refresh on a connected machine; see [docs/OFFLINE_INSTALL.md](docs/OFFLINE_INSTALL.md).
+git >= 2.41, bash, tar/gzip, and for pr-agent a Python 3.12, 3.13 or 3.14 with `venv`. Wheels are
+bundled for Linux x86_64, Linux arm64 and macOS arm64. Node is optional (ponytail hooks). Any other
+Python or platform (Intel Macs included): `scripts/install.sh --allow-network` if PyPI or a mirror is
+reachable, otherwise a one-off wheel refresh on a connected machine; see
+[docs/OFFLINE_INSTALL.md](docs/OFFLINE_INSTALL.md).
 
 ## Documentation
 

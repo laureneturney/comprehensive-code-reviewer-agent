@@ -3,16 +3,18 @@
 # Unpacks the vendored ocr and reviewdog binaries and builds the pr-agent venv from the
 # vendored wheelhouse. Makes NO network requests.
 #
-#   scripts/install.sh [--prefix DIR] [--python BIN] [--skip-python] [--force]
-#     --prefix DIR    also symlink ccra, ocr, reviewdog, pr-agent into DIR (e.g. ~/.local/bin, /usr/local/bin)
-#     --python BIN    python >= 3.12 to build the venv with (default: first of python3.12 python3.13 python3.14 python3)
-#     --skip-python   install only the Go binaries (ocr, reviewdog)
-#     --force         rebuild even if already installed
+#   scripts/install.sh [--prefix DIR] [--python BIN] [--skip-python] [--force] [--allow-network [--index-url URL]]
+#     --prefix DIR      also symlink ccra, ocr, reviewdog, pr-agent into DIR (e.g. ~/.local/bin, /usr/local/bin)
+#     --python BIN      python >= 3.12 to build the venv with (default: first of python3.12 python3.13 python3.14 python3)
+#     --skip-python     install only the Go binaries (ocr, reviewdog)
+#     --force           rebuild even if already installed
+#     --allow-network   if the vendored wheelhouse lacks wheels for this Python/platform, fall back to pip's
+#                       package index (PyPI, or --index-url for an internal mirror). Default: never touch the network.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CCRA_HOME="${CCRA_HOME:-$ROOT/.ccra}"
-PREFIX="" PYTHON="" SKIP_PYTHON=0 FORCE=0
+PREFIX="" PYTHON="" SKIP_PYTHON=0 FORCE=0 ALLOW_NETWORK=0 INDEX_URL=""
 
 die()  { echo "install: $*" >&2; exit 1; }
 note() { echo "==> $*"; }
@@ -23,7 +25,9 @@ while [ $# -gt 0 ]; do
     --python) PYTHON="$2"; shift 2 ;;
     --skip-python) SKIP_PYTHON=1; shift ;;
     --force) FORCE=1; shift ;;
-    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+    --allow-network) ALLOW_NETWORK=1; shift ;;
+    --index-url) INDEX_URL="$2"; shift 2 ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
 done
@@ -105,19 +109,37 @@ else
       "$PY" -m venv "$CCRA_HOME/venv" || die "python -m venv failed (on Debian/Ubuntu install the python3-venv package)"
       VPY="$CCRA_HOME/venv/bin/python"
       "$VPY" -m pip install --no-index --find-links "$WHEELS" --upgrade pip setuptools wheel -q 2>/dev/null || true
-      if ! "$VPY" -m pip install --no-index --find-links "$WHEELS" -r "$WHEELS/requirements.lock.txt" -q; then
-        cat >&2 <<MSG
-install: pip could not satisfy the lockfile from the vendored wheelhouse.
-  The wheelhouse holds CPython 3.12 wheels for Linux x86_64 (manylinux) and macOS arm64.
-  This machine: $("$VPY" -c 'import platform,sys; print(platform.platform(), sys.version.split()[0])').
-  On a machine with internet, run: scripts/fetch-offline-assets.sh --wheels-only --python-version X.Y --platform <tag>
-  then commit vendor/wheels/pr-agent and re-run this installer.
+      if ! "$VPY" -m pip install --no-index --find-links "$WHEELS" -r "$WHEELS/requirements.lock.txt" -q 2>"$CCRA_HOME/pip-offline.log"; then
+        pyver="$("$VPY" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+        plat="$("$VPY" -c 'import sysconfig; print(sysconfig.get_platform())')"
+        case "$plat" in
+          *linux*x86_64*) tag=linux-amd64 ;; *linux*aarch64*|*linux*arm64*) tag=linux-arm64 ;;
+          *macosx*arm64*) tag=darwin-arm64 ;; *macosx*x86_64*) tag=darwin-amd64 ;; *) tag="$plat" ;;
+        esac
+        if [ $ALLOW_NETWORK -eq 1 ]; then
+          note "wheelhouse has no match for CPython $pyver on $plat; retrying with the package index ${INDEX_URL:-(default PyPI)}"
+          "$VPY" -m pip install ${INDEX_URL:+--index-url "$INDEX_URL"} --find-links "$WHEELS" -r "$WHEELS/requirements.lock.txt" -q \
+            || die "pip install from the package index failed (see output above)"
+        else
+          cat >&2 <<MSG
+install: the vendored wheelhouse has no wheels for CPython $pyver on $plat
+  (first missing package: $(grep -m1 -o 'for [a-zA-Z0-9_.-]*==[0-9a-z.]*' "$CCRA_HOME/pip-offline.log" | head -1)).
+  Bundled Python versions and platforms are listed in vendor/MANIFEST.json under wheels.pr-agent.
+  Options:
+    a) this machine can reach PyPI or an internal mirror:
+         scripts/install.sh --allow-network [--index-url https://mirror.example/simple]${PREFIX:+ --prefix $PREFIX}
+    b) a connected machine refreshes the wheelhouse, then commit, push and pull here:
+         scripts/fetch-offline-assets.sh --wheels-only --python-version $pyver --platform $tag
+    c) use a bundled Python version instead: scripts/install.sh --python /path/to/python3.12${PREFIX:+ --prefix $PREFIX}
+  ocr and reviewdog are installed; only pr-agent (and ruff) are missing.
 MSG
-        exit 1
+          exit 1
+        fi
       fi
       # Vendored ruff (vendor/wheels/tools) powers `ccra lint` and `ccra audit` offline.
       if ls "$ROOT/vendor/wheels/tools"/ruff-*.whl >/dev/null 2>&1; then
-        if "$VPY" -m pip install --no-index --find-links "$ROOT/vendor/wheels/tools" ruff -q 2>/dev/null; then
+        if "$VPY" -m pip install --no-index --find-links "$ROOT/vendor/wheels/tools" ruff -q 2>/dev/null \
+           || { [ $ALLOW_NETWORK -eq 1 ] && "$VPY" -m pip install ${INDEX_URL:+--index-url "$INDEX_URL"} ruff -q; }; then
           note "ruff $("$CCRA_HOME/venv/bin/ruff" --version 2>/dev/null | awk '{print $2}') installed into the venv (ccra lint / ccra audit)"
         else
           note "no ruff wheel for this platform; ccra lint/audit will use ruff from PATH or uvx"

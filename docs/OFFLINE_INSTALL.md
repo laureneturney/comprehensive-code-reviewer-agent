@@ -19,7 +19,7 @@ Pick whichever route exists in your environment:
 | Linux x86_64 / arm64, or macOS arm64 / x86_64 | ocr, reviewdog | Binaries for these four platforms are vendored. Windows is not. |
 | `git` >= 2.41 | everything | ocr refuses older git. |
 | `bash`, `tar`, `gzip`, `sha256sum` or `shasum` | installer | Standard on Linux/macOS. |
-| Python >= 3.12 with `venv` | pr-agent only | Wheels are vendored for **CPython 3.12 on Linux x86_64 and macOS arm64**. Other combinations: see §5. Debian/Ubuntu need `python3-venv`. |
+| Python >= 3.12 with `venv` | pr-agent and ruff | Wheels are vendored for **CPython 3.12, 3.13 and 3.14 on Linux x86_64, Linux arm64 and macOS arm64**. Intel Macs cannot be served from wheels (the pinned `cryptography` publishes no macOS x86_64 wheel) and need `--allow-network`. Anything else: see §5. Debian/Ubuntu need `python3-venv`. |
 | `node` >= 14 | optional | ponytail's lifecycle hooks and ocr's npm launcher. Skills work without it. |
 | A coding agent (Claude Code, Codex, Cursor, OpenCode, ...) | optional | For ponytail and ocr delegate mode. |
 
@@ -60,16 +60,22 @@ from `config/ccra.env.example`.
 
 ## 5. Other Python versions or platforms
 
-The wheelhouse was built for CPython 3.12 on `manylinux x86_64` and `macosx arm64`. If the
-target differs (for example Python 3.11, which pr-agent does not support, or Linux arm64),
-run on a connected machine:
+If `install.sh` stops with `No matching distribution found for <package>`, the wheelhouse has no
+wheels for that machine's Python version and platform. The installer prints both, plus the exact
+commands for each way out:
 
-```bash
-scripts/fetch-offline-assets.sh --wheels-only --python-version 3.13 --platform linux-arm64
-git add vendor/wheels && git commit -m "wheels: cp313 linux-arm64" && git push
-```
+- **The machine can reach PyPI or an internal mirror** (GitHub being blocked does not imply PyPI is):
+  `scripts/install.sh --allow-network [--index-url https://mirror.example/simple] --prefix ~/.local/bin`.
+  It still prefers the vendored wheels and only fetches what is missing.
+- **Refresh the wheelhouse on a connected machine**, then commit, push and pull on the target:
+  ```bash
+  scripts/fetch-offline-assets.sh --wheels-only --python-version 3.13 --platform linux-arm64
+  git add vendor/wheels && git commit -m "wheels: cp313 linux-arm64" && git push
+  ```
+  then `scripts/install.sh --force` on the target.
+- **Use a bundled Python version** with `scripts/install.sh --python /path/to/python3.12`.
 
-Then pull on the target and re-run `scripts/install.sh --force`.
+Python 3.11 and older are not supported by pr-agent at all; ocr and reviewdog install regardless.
 
 ## 6. Building the Go tools from source (optional)
 

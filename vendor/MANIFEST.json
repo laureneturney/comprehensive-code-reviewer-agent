@@ -82,9 +82,10 @@
   "wheels": {
     "pr-agent": {
       "lock_source": "tools/pr-agent/uv.lock (uv 0.13.5 export, --no-dev --extra github --extra gitlab)",
-      "python": "3.12 (cp312; abi3 wheels also work on newer CPython)",
+      "python": "CPython 3.12, 3.13, 3.14 (cp312/cp313/cp314 plus abi3 and pure-python wheels)",
       "platforms": [
         "manylinux_2_17..2_34 x86_64",
+        "manylinux_2_17..2_34 aarch64",
         "macosx_11_0+ arm64"
       ],
       "extras_included": [
@@ -100,7 +101,8 @@
         "mosaico",
         "lambda"
       ],
-      "how_to_add_platforms": "scripts/fetch-offline-assets.sh --wheels-only --platform <tag> --python-version <x.y>"
+      "how_to_add_platforms": "scripts/fetch-offline-assets.sh --wheels-only --python-version X.Y --platform linux-amd64|linux-arm64|darwin-arm64",
+      "not_served": "macOS x86_64: the pinned cryptography==50.0.0 has no Intel-mac wheel; use scripts/install.sh --allow-network"
     },
     "tools": {
       "ruff": {

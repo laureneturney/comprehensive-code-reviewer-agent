@@ -63,7 +63,7 @@ if [ $DO_WHL -eq 1 ]; then
     command -v uv >/dev/null 2>&1 || { echo "uv >= 0.13.5 is required for --relock" >&2; exit 1; }
     ( cd "$ROOT/tools/pr-agent" && uv export --frozen --no-dev --no-hashes --no-emit-project --extra github --extra gitlab --format requirements-txt -o "$W/requirements.lock.txt" )
   fi
-  PIP="${PIP:-python3 -m pip}"
+  PIP="${PIP:-python3 -m pip}"; OK=(); FAILED=()
   for pv in "${PYVERS[@]}"; do
     abi="cp${pv/./}"
     for p in "${PLATFORMS[@]}"; do
@@ -76,11 +76,20 @@ if [ $DO_WHL -eq 1 ]; then
       esac
       echo "==> wheels for cp$pv $p"
       args=(); for t in "${tags[@]}"; do args+=(--platform "$t"); done
-      $PIP download -r "$W/requirements.lock.txt" -d "$W" --only-binary=:all: "${args[@]}" --python-version "$pv" --implementation cp --abi "$abi" --abi abi3 --abi none -q
-      $PIP download pip setuptools wheel -d "$W" --only-binary=:all: --python-version "$pv" -q
-      $PIP download ruff -d "$T" --only-binary=:all: "${args[@]}" --python-version "$pv" --implementation cp --abi "$abi" --abi abi3 --abi none -q
+      # pip resolves the whole lockfile first, so one package without a wheel for this combination
+      # (e.g. cryptography on macOS x86_64) means nothing is downloaded for it; record and move on.
+      if ! $PIP download -r "$W/requirements.lock.txt" -d "$W" --only-binary=:all: "${args[@]}" --python-version "$pv" --implementation cp --abi "$abi" --abi abi3 --abi none -q; then
+        echo "    !! no complete wheel set for cp$pv $p (see pip error above); skipped"
+        FAILED+=("cp$pv $p"); continue
+      fi
+      $PIP download pip setuptools wheel -d "$W" --only-binary=:all: --python-version "$pv" -q || true
+      $PIP download ruff -d "$T" --only-binary=:all: "${args[@]}" --python-version "$pv" --implementation cp --abi "$abi" --abi abi3 --abi none -q \
+        || echo "    !! no ruff wheel for cp$pv $p"
+      OK+=("cp$pv $p")
     done
   done
+  echo "complete wheel sets: ${OK[*]:-none}"
+  [ ${#FAILED[@]} -gt 0 ] && echo "incomplete (not served offline): ${FAILED[*]}"
   ( cd "$W" && { sha256sum *.whl 2>/dev/null || shasum -a 256 *.whl; } > SHA256SUMS.txt )
   ( cd "$T" && { sha256sum *.whl 2>/dev/null || shasum -a 256 *.whl; } > SHA256SUMS.txt )
   echo "wheelhouse: $(ls "$W"/*.whl | wc -l | tr -d ' ') wheels, $(du -sh "$W" | cut -f1)"
